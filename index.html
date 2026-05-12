@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
 <style>
 :root{
   --bg:#09090e;--bg1:#0f0f16;--bg2:#16161f;--bg3:#1e1e2a;--bg4:#272736;
@@ -1325,209 +1326,108 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 8000);
 }
 
-// ── ONEDRIVE AUTH (OAuth2 PKCE, CDN不要・自前実装) ────
-// MSAL CDNへの依存を排除。OAuth2 PKCEフローを直接実装。
-// GitHub Pagesで動作。ポップアップ不要のリダイレクト方式。
+// ── ONEDRIVE / MSAL ───────────────────────────────────
+// Azure App Registration が必要です（README.md 参照）
+// 取得した Client ID を localStorage に保存して使用します
 
-const OD_SCOPES       = 'Files.ReadWrite.AppFolder Files.Read User.Read offline_access';
+const OD_SCOPES = ['Files.ReadWrite.AppFolder','Files.Read','User.Read'];
 const OD_META_FILENAME = 'movref_data.json';
-const OD_AUTH_URL      = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
-const OD_TOKEN_URL     = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
 
-let odToken   = null;
-let odRefresh = null;
-let odAccount = null;
+let msalInstance = null;
+let odAccount    = null;
+let odToken      = null;
 
-function getClientId(){ return localStorage.getItem('movref_od_client_id') || ''; }
-function getRedirectUri(){ return location.origin + location.pathname; }
-
-// ── PKCE helpers ──────────────────────────────────────
-async function pkceChallenge(){
-  const arr = crypto.getRandomValues(new Uint8Array(32));
-  const verifier = btoa(String.fromCharCode(...arr))
-    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-  const buf = await crypto.subtle.digest('SHA-256',
-    new TextEncoder().encode(verifier));
-  const challenge = btoa(String.fromCharCode(...new Uint8Array(buf)))
-    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-  return { verifier, challenge };
+function getClientId(){
+  return localStorage.getItem('movref_od_client_id') || '';
 }
 
-// ── SIGN IN (リダイレクト方式) ────────────────────────
+async function initMsal(){
+  const clientId = getClientId();
+  if(!clientId){ return; } // Client ID未設定なら何もしない
+  if(msalInstance) return; // 既に初期化済み
+  try{
+    msalInstance = new msal.PublicClientApplication({
+      auth:{
+        clientId,
+        authority:'https://login.microsoftonline.com/common',
+        redirectUri: location.origin + location.pathname,
+      },
+      cache:{ cacheLocation:'localStorage', storeAuthStateInCookie:false }
+    });
+    // リダイレクト後の処理
+    const resp = await msalInstance.handleRedirectPromise();
+    if(resp && resp.account){
+      odAccount = resp.account;
+      odToken   = resp.accessToken;
+      onOdSignedIn();
+      return;
+    }
+    // キャッシュからアカウント復元
+    const accounts = msalInstance.getAllAccounts();
+    if(accounts.length > 0){
+      odAccount = accounts[0];
+      const t = await acquireToken();
+      if(t) onOdSignedIn();
+    }
+  }catch(e){ console.warn('MSAL init error:', e); }
+}
+
+async function acquireToken(){
+  if(!msalInstance || !odAccount) return null;
+  try{
+    const r = await msalInstance.acquireTokenSilent({ scopes: OD_SCOPES, account: odAccount });
+    odToken = r.accessToken;
+    return odToken;
+  }catch(e){
+    try{
+      const r = await msalInstance.acquireTokenPopup({ scopes: OD_SCOPES });
+      odToken = r.accessToken; odAccount = r.account;
+      return odToken;
+    }catch(e2){ notify('トークン取得失敗: ' + e2.message, 'error'); return null; }
+  }
+}
+
 async function odSignIn(){
   let clientId = getClientId();
   if(!clientId){
-    clientId = (prompt('Azure Client ID を入力してください\n（README.md の Step 3 を参照）') || '').trim();
+    clientId = (prompt(
+      'Azure Client ID を入力してください\n\n' +
+      '取得方法: README.md を参照\n' +
+      '（一度入力すると保存されます）'
+    ) || '').trim();
     if(!clientId){ notify('Client IDが必要です', 'error'); return; }
     localStorage.setItem('movref_od_client_id', clientId);
+    msalInstance = null; // 再初期化
   }
-
-  const { verifier, challenge } = await pkceChallenge();
-  const state = crypto.randomUUID();
-  // verifierとstateをセッションに保存（リダイレクト後に使う）
-  sessionStorage.setItem('od_pkce_verifier', verifier);
-  sessionStorage.setItem('od_state', state);
-
-  const params = new URLSearchParams({
-    client_id:     clientId,
-    response_type: 'code',
-    redirect_uri:  getRedirectUri(),
-    scope:         OD_SCOPES,
-    state,
-    code_challenge:        challenge,
-    code_challenge_method: 'S256',
-    response_mode: 'query',
-  });
-  location.href = OD_AUTH_URL + '?' + params.toString();
-}
-
-// ── リダイレクト後の認可コード受け取り ───────────────
-async function handleOdRedirect(){
-  const params = new URLSearchParams(location.search);
-  const code  = params.get('code');
-  const state = params.get('state');
-  const error = params.get('error');
-
-  if(error){
-    notify('サインインエラー: ' + (params.get('error_description') || error), 'error');
-    // URLをクリーンアップ
-    history.replaceState({}, '', location.pathname);
-    return;
+  // MSAL初期化（未初期化の場合）
+  if(!msalInstance){
+    try{
+      msalInstance = new msal.PublicClientApplication({
+        auth:{
+          clientId,
+          authority:'https://login.microsoftonline.com/common',
+          redirectUri: location.origin + location.pathname,
+        },
+        cache:{ cacheLocation:'localStorage', storeAuthStateInCookie:false }
+      });
+      await msalInstance.handleRedirectPromise().catch(()=>{});
+    }catch(e){ notify('MSAL初期化エラー: ' + e.message, 'error'); return; }
   }
-  if(!code) return; // 認可コードがなければ何もしない
-
-  const savedState    = sessionStorage.getItem('od_state');
-  const savedVerifier = sessionStorage.getItem('od_pkce_verifier');
-  sessionStorage.removeItem('od_state');
-  sessionStorage.removeItem('od_pkce_verifier');
-
-  if(state !== savedState){
-    notify('stateパラメータが一致しません（CSRF対策）', 'error');
-    history.replaceState({}, '', location.pathname);
-    return;
-  }
-
-  const clientId = getClientId();
-  notify('OneDriveに接続中...');
-
   try{
-    const body = new URLSearchParams({
-      client_id:     clientId,
-      grant_type:    'authorization_code',
-      code,
-      redirect_uri:  getRedirectUri(),
-      code_verifier: savedVerifier,
-    });
-    const resp = await fetch(OD_TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
-    });
-    if(!resp.ok){
-      const e = await resp.json().catch(()=>({}));
-      throw new Error(e.error_description || e.error || 'トークン取得失敗');
-    }
-    const tokens = await resp.json();
-    storeTokens(tokens);
-    // URLをクリーンアップ
-    history.replaceState({}, '', location.pathname);
-    await loadUserInfo();
+    const r = await msalInstance.loginPopup({ scopes: OD_SCOPES });
+    odAccount = r.account; odToken = r.accessToken;
     onOdSignedIn();
   }catch(e){
-    notify('トークン取得エラー: ' + e.message, 'error');
-    history.replaceState({}, '', location.pathname);
+    if(e.errorCode !== 'user_cancelled')
+      notify('サインイン失敗: ' + (e.message || e.errorCode), 'error');
   }
-}
-
-function storeTokens(tokens){
-  odToken   = tokens.access_token;
-  odRefresh = tokens.refresh_token || odRefresh;
-  const exp = Date.now() + (tokens.expires_in || 3600) * 1000;
-  localStorage.setItem('movref_od_tokens', JSON.stringify({
-    access_token:  odToken,
-    refresh_token: odRefresh,
-    expires_at:    exp,
-  }));
-}
-
-async function refreshToken(){
-  const clientId = getClientId();
-  if(!clientId || !odRefresh) return false;
-  try{
-    const body = new URLSearchParams({
-      client_id:     clientId,
-      grant_type:    'refresh_token',
-      refresh_token: odRefresh,
-      scope:         OD_SCOPES,
-    });
-    const resp = await fetch(OD_TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
-    });
-    if(!resp.ok) return false;
-    const tokens = await resp.json();
-    storeTokens(tokens);
-    return true;
-  }catch(e){ return false; }
-}
-
-// ── 起動時: 保存済みトークンを復元 ───────────────────
-async function initMsal(){
-  const saved = localStorage.getItem('movref_od_tokens');
-  if(!saved) return;
-  try{
-    const t = JSON.parse(saved);
-    odToken   = t.access_token;
-    odRefresh = t.refresh_token;
-    // 期限切れならリフレッシュ
-    if(t.expires_at < Date.now() + 60000){
-      const ok = await refreshToken();
-      if(!ok){ odToken = null; return; }
-    }
-    await loadUserInfo();
-    onOdSignedIn();
-  }catch(e){ localStorage.removeItem('movref_od_tokens'); }
-}
-
-async function loadUserInfo(){
-  try{
-    const r = await odFetch('https://graph.microsoft.com/v1.0/me?$select=displayName,userPrincipalName');
-    if(r && r.ok){
-      const d = await r.json();
-      odAccount = { name: d.displayName || d.userPrincipalName };
-    }
-  }catch(e){}
-}
-
-// ── API fetch with auto-refresh ────────────────────────
-async function odFetch(url, opts = {}){
-  if(!odToken){ notify('OneDriveにサインインしてください', 'error'); return null; }
-  const doFetch = () => fetch(url, {
-    ...opts,
-    headers: {
-      Authorization: 'Bearer ' + odToken,
-      'Content-Type': 'application/json',
-      ...(opts.headers || {}),
-    },
-  });
-  let r = await doFetch();
-  if(r.status === 401){
-    // トークン期限切れ → リフレッシュして再試行
-    const ok = await refreshToken();
-    if(!ok){ notify('セッション期限切れ。再サインインしてください', 'error'); return null; }
-    r = await doFetch();
-  }
-  return r;
 }
 
 function onOdSignedIn(){
-  const name = odAccount?.name || 'ユーザー';
+  const name = odAccount?.name || odAccount?.username || 'ユーザー';
+  // トップバー更新
   const btn = document.getElementById('od-btn');
-  if(btn){
-    btn.classList.add('connected');
-    btn.innerHTML = `<span class="dot" style="background:var(--accent);box-shadow:0 0 5px var(--accent)"></span>${name}`;
-  }
+  if(btn){ btn.classList.add('connected'); btn.innerHTML = `<span class="dot" id="od-dot" style="background:var(--accent);box-shadow:0 0 5px var(--accent)"></span>${name}`; }
   const fb = document.getElementById('od-folder-btn');  if(fb) fb.style.display = 'flex';
   const sb = document.getElementById('od-signout-btn'); if(sb) sb.style.display = 'flex';
   loadMetaFromOd();
@@ -1535,13 +1435,28 @@ function onOdSignedIn(){
 }
 
 function odSignOut(){
-  odToken = null; odRefresh = null; odAccount = null;
-  localStorage.removeItem('movref_od_tokens');
+  if(msalInstance && odAccount) msalInstance.logoutPopup({ account: odAccount }).catch(()=>{});
+  odAccount = null; odToken = null;
   const btn = document.getElementById('od-btn');
   if(btn){ btn.classList.remove('connected'); btn.innerHTML = '<span class="dot" id="od-dot"></span>OneDrive'; }
-  const fb = document.getElementById('od-folder-btn');  if(fb) fb.style.display = 'none';
-  const sb = document.getElementById('od-signout-btn'); if(sb) sb.style.display = 'none';
+  document.getElementById('od-folder-btn').style.display  = 'none';
+  document.getElementById('od-signout-btn').style.display = 'none';
   notify('OneDriveからサインアウトしました');
+}
+
+async function odFetch(url, opts = {}){
+  if(!odToken){ odToken = await acquireToken(); }
+  if(!odToken) return null;
+  const r = await fetch(url, {
+    ...opts,
+    headers:{ Authorization: 'Bearer ' + odToken, 'Content-Type':'application/json', ...(opts.headers||{}) }
+  });
+  if(r.status === 401){
+    odToken = null;
+    notify('セッション期限切れ。再サインインしてください', 'error');
+    return null;
+  }
+  return r;
 }
 
 // ── META SYNC (OneDrive appDataFolder) ───────────────
@@ -1602,7 +1517,7 @@ store.save = function(){ _origSave(); if(odToken) saveMetaToOd(); };
 // ── FOLDER PICKER (OneDrive) ──────────────────────────
 // OneDrive のフォルダを一覧 → prompt で選択 → 動画を読み込む
 async function odPickFolder(){
-  if(!odToken){ notify('OneDriveにサインインしてください', 'error'); return; }
+  if(!odToken && !(await acquireToken())){ notify('サインインしてください', 'error'); return; }
   try{
     notify('フォルダ一覧を取得中...');
     const r = await odFetch(
@@ -1826,12 +1741,7 @@ function fmt(s){
 store.load();
 applyDesktopSB();
 updateFilterUI();
-// OneDriveリダイレクト処理（認可コードがURLにある場合）→ なければトークン復元
-if(location.search.includes('code=')){
-  handleOdRedirect();
-} else {
-  initMsal();
-}
+initMsal(); // MSAL: キャッシュからアカウント自動復元を試みる
 switchView('mov');
 </script>
 </body>
