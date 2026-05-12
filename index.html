@@ -1,0 +1,1748 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>movRef</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
+<script src="https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js"></script>
+<style>
+:root{
+  --bg:#09090e;--bg1:#0f0f16;--bg2:#16161f;--bg3:#1e1e2a;--bg4:#272736;
+  --border:rgba(255,255,255,.07);--border2:rgba(255,255,255,.13);
+  --accent:#9b6dff;--adim:rgba(155,109,255,.18);--aglow:rgba(155,109,255,.35);
+  --accent2:#c084fc;--accent3:#ff6b9d;
+  --text:#eeeef5;--text2:#8888a0;--text3:#44445a;
+  --sw:240px;--th:54px;--rl:14px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{font-size:14px;-webkit-tap-highlight-color:transparent}
+body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+
+/* ── TOPBAR ── */
+#topbar{position:fixed;top:0;left:0;right:0;height:var(--th);background:rgba(9,9,14,.95);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 12px;gap:8px;z-index:200;overflow:hidden}
+.sb-toggle{width:34px;height:34px;border-radius:8px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s}
+.sb-toggle:hover{border-color:var(--accent);color:var(--accent)}
+.logo{font-family:'Syne',sans-serif;font-weight:800;font-size:1.15rem;letter-spacing:-.04em;color:var(--accent);flex-shrink:0;text-shadow:0 0 18px var(--aglow)}
+.logo em{font-style:normal;color:var(--accent2)}
+.view-tabs{display:flex;gap:2px;background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:3px;flex-shrink:0;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.view-tabs::-webkit-scrollbar{display:none}
+.tab-btn{font-family:'Syne',sans-serif;font-weight:700;font-size:.68rem;letter-spacing:.04em;text-transform:uppercase;padding:5px 10px;border:none;cursor:pointer;border-radius:4px;transition:all .2s;background:transparent;color:var(--text3);white-space:nowrap;flex-shrink:0}
+.tab-btn.active{background:var(--bg4);color:var(--text)}
+.tb-spacer{flex:1;min-width:0}
+.search-wrap{position:relative;display:flex;align-items:center;flex-shrink:0}
+.search-wrap svg{position:absolute;left:8px;opacity:.35;pointer-events:none}
+#search-input{background:var(--bg2);border:1px solid var(--border);border-radius:7px;padding:5px 8px 5px 28px;color:var(--text);font-size:.78rem;font-family:'DM Mono',monospace;width:130px;outline:none;transition:border .2s}
+@media(max-width:480px){#search-input{width:80px;font-size:.72rem}}
+#search-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--adim)}
+.connect-btns{display:flex;gap:5px;flex-shrink:0}
+@media(max-width:640px){.connect-btns{display:none}}
+.btn-conn{display:flex;align-items:center;gap:4px;font-family:'DM Mono',monospace;font-size:.68rem;padding:4px 9px;border-radius:6px;border:1px solid var(--border);background:var(--bg2);color:var(--text2);cursor:pointer;transition:all .2s;white-space:nowrap}
+.btn-conn:hover{border-color:var(--accent);color:var(--accent)}
+.btn-conn.connected{border-color:rgba(155,109,255,.4);color:var(--accent)}
+.btn-conn .dot{width:5px;height:5px;border-radius:50%;background:var(--text3);flex-shrink:0}
+.btn-conn.connected .dot{background:var(--accent);box-shadow:0 0 5px var(--accent)}
+
+/* ── SIDEBAR ── */
+#sb-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:149;backdrop-filter:blur(4px)}
+#sb-overlay.open{display:block}
+#sidebar{position:fixed;top:var(--th);left:0;width:var(--sw);bottom:0;background:var(--bg1);border-right:1px solid var(--border);padding:0;overflow-y:auto;z-index:150;display:flex;flex-direction:column;transition:transform .28s cubic-bezier(.4,0,.2,1);transform:translateX(calc(-1 * var(--sw)))}
+#sidebar.open{transform:translateX(0)}
+@media(min-width:768px){#sidebar{transform:translateX(0)}#sidebar.hidden{transform:translateX(calc(-1 * var(--sw)))}}
+.sb-section{padding:14px 12px 10px}
+.sb-section+.sb-section{border-top:1px solid var(--border)}
+.sb-sec-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.sb-sec-title{font-family:'DM Mono',monospace;font-size:.6rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text3)}
+.sb-sec-sort{font-family:'DM Mono',monospace;font-size:.58rem;color:var(--text3);background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:2px 6px;cursor:pointer;outline:none;transition:border .2s}
+.sb-sec-sort:focus{border-color:var(--accent)}
+/* tag list with drag/sort */
+.tag-list{display:flex;flex-wrap:wrap;gap:5px;min-height:24px}
+.tag-chip{font-family:'DM Mono',monospace;font-size:.67rem;padding:3px 9px;border-radius:20px;border:1px solid var(--border2);background:transparent;color:var(--text2);cursor:pointer;transition:all .2s;user-select:none}
+.tag-chip:hover{border-color:var(--accent);color:var(--accent)}
+.tag-chip.active{background:var(--accent);color:#fff;border-color:var(--accent);box-shadow:0 0 8px var(--aglow)}
+/* filter items toggle */
+.folder-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;cursor:pointer;transition:all .15s;font-size:.8rem;color:var(--text2)}
+.folder-item:hover{background:var(--bg3);color:var(--text)}
+.folder-item.active{background:var(--adim);color:var(--accent);border:1px solid var(--accent)}
+.folder-item:not(.active){border:1px solid transparent}
+
+/* ── MAIN ── */
+#main{padding-top:var(--th);min-height:100vh;margin-left:var(--sw);transition:margin-left .28s cubic-bezier(.4,0,.2,1)}
+@media(max-width:767px){#main{margin-left:0 !important}}
+.view-panel{padding:14px}
+#view-mov{display:none}
+#view-ref{display:none}
+
+/* ── TOOLBAR ── */
+.toolbar{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.toolbar-label{font-family:'DM Mono',monospace;font-size:.63rem;color:var(--text3);letter-spacing:.07em;white-space:nowrap}
+.slider-wrap{display:flex;align-items:center;gap:6px}
+.sz-slider{-webkit-appearance:none;appearance:none;width:80px;height:4px;border-radius:2px;background:var(--bg4);outline:none;cursor:pointer}
+.sz-slider::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent);box-shadow:0 0 7px var(--aglow);cursor:pointer;border:2px solid var(--bg)}
+.sz-slider::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--accent);border:2px solid var(--bg);cursor:pointer}
+.sz-label{font-family:'DM Mono',monospace;font-size:.63rem;color:var(--accent);min-width:28px}
+.sort-sel{background:var(--bg2);border:1px solid var(--border);color:var(--text2);font-family:'DM Mono',monospace;font-size:.7rem;padding:4px 8px;border-radius:6px;outline:none;cursor:pointer}
+.sort-sel:focus{border-color:var(--accent)}
+.tb-count{font-family:'DM Mono',monospace;font-size:.63rem;color:var(--text2)}
+.conte-toggle-btn{display:flex;align-items:center;gap:5px;font-family:'DM Mono',monospace;font-size:.65rem;letter-spacing:.04em;padding:5px 10px;border-radius:6px;border:1px solid var(--border2);background:transparent;color:var(--text2);cursor:pointer;transition:all .2s;white-space:nowrap}
+.conte-toggle-btn:hover{border-color:var(--accent);color:var(--accent)}
+.conte-toggle-btn.active{border-color:var(--accent);color:var(--accent);background:var(--adim);box-shadow:0 0 8px var(--aglow)}
+
+/* ── VIDEO GRID ── */
+.v-grid{display:grid;grid-template-columns:repeat(var(--cols,2),1fr);gap:var(--gap,12px)}
+
+/* ── VIDEO CARD ── */
+.vcard{background:var(--bg1);border:1px solid var(--border);border-radius:var(--rl);overflow:hidden;cursor:pointer;position:relative;transition:transform .2s,border-color .2s,box-shadow .2s}
+.vcard:hover{transform:translateY(-2px);border-color:var(--border2);box-shadow:0 8px 28px rgba(0,0,0,.5),0 0 0 1px var(--adim)}
+.card-thumb{width:100%;height:0;padding-bottom:56.25%;background:#000;position:relative;overflow:hidden}
+.card-thumb .thumb-static,.card-thumb .thumb-preview{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;display:block;pointer-events:none;background:#000}
+.card-thumb .thumb-preview{display:none}
+.vcard:hover .thumb-static{display:none}
+.vcard:hover .thumb-preview{display:block}
+.thumb-ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.8rem;opacity:.2}
+.card-dur{position:absolute;bottom:6px;right:6px;font-family:'DM Mono',monospace;font-size:calc(.5rem + var(--card-fs,0px));background:rgba(0,0,0,.75);color:#fff;padding:2px 6px;border-radius:4px;z-index:2}
+.fav-btn{position:absolute;top:6px;right:6px;width:28px;height:28px;border-radius:50%;background:rgba(0,0,0,.65);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:.9rem;opacity:0;transition:opacity .2s;z-index:2}
+.vcard:hover .fav-btn,.fav-btn.on{opacity:1}
+.card-body{padding:10px 12px 12px}
+.card-title{font-size:calc(.82rem + var(--card-fs,0px));font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:4px}
+.card-meta{font-family:'DM Mono',monospace;font-size:calc(.58rem + var(--card-fs,0px));color:var(--text3);margin-bottom:3px;display:flex;flex-wrap:wrap;gap:4px 10px}
+.card-meta-item{display:flex;align-items:center;gap:3px}
+.card-memo{font-size:calc(.67rem + var(--card-fs,0px));color:var(--text2);margin:4px 0;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-tags{display:flex;flex-wrap:wrap;gap:3px;margin-top:4px}
+.card-tag{font-family:'DM Mono',monospace;font-size:calc(.55rem + var(--card-fs,0px));padding:2px 7px;border-radius:20px;background:var(--bg3);color:var(--text2);border:1px solid var(--border)}
+.vcard.compact .card-body{padding:5px 8px 8px}
+.vcard.compact .card-title{font-size:.68rem}
+.vcard.compact .card-meta,.vcard.compact .card-tags,.vcard.compact .card-memo{display:none}
+
+/* ── CONTE STRIP (3×3) ── */
+.vcard.conte-mode .card-thumb{display:none!important}
+.conte-strip{display:none;width:100%;background:#000;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);gap:1px;aspect-ratio:3/1}/* 3cols×1:aspect, each cell 16:9 → total 3:1 */
+.vcard:not(.conte-mode) .conte-strip{display:none!important}
+.vcard.conte-mode .conte-strip{display:grid}
+/* each cell is 16:9 */
+.cs-cell{position:relative;overflow:hidden;background:#000;width:100%;aspect-ratio:16/9}
+.cs-cell canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.cs-cell-num{position:absolute;top:3px;left:4px;font-family:'DM Mono',monospace;font-size:.44rem;font-weight:500;color:rgba(155,109,255,.95);letter-spacing:.04em;text-shadow:0 1px 3px rgba(0,0,0,.9);z-index:2}
+.cs-cell-tc{position:absolute;bottom:3px;left:4px;font-family:'DM Mono',monospace;font-size:.4rem;color:rgba(255,255,255,.5);text-shadow:0 1px 2px rgba(0,0,0,.9);z-index:2}
+.cs-spin-wrap{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.cs-spin{width:10px;height:10px;border:1.5px solid rgba(155,109,255,.2);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── EMPTY ── */
+.empty{grid-column:1/-1;text-align:center;padding:60px 16px;color:var(--text3)}
+.empty .bi{font-size:3rem;margin-bottom:12px;opacity:.22}
+.empty p{font-size:.86rem;line-height:2}
+.demo-btn{margin-top:16px;font-family:'Syne',sans-serif;font-weight:700;font-size:.78rem;letter-spacing:.04em;padding:9px 22px;border-radius:8px;background:var(--accent);color:#fff;border:none;cursor:pointer;box-shadow:0 0 18px var(--aglow);transition:opacity .2s}
+.demo-btn:hover{opacity:.85}
+
+/* ── REF VIEW ── */
+.ref-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.ref-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+.ref-card{background:var(--bg1);border:1px solid var(--border);border-radius:var(--rl);overflow:hidden;transition:border-color .2s}
+.ref-card:hover{border-color:var(--border2)}
+.ref-head{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-bottom:1px solid var(--border);gap:8px}
+.ref-title{font-size:.78rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+.ref-range{font-family:'DM Mono',monospace;font-size:.63rem;color:var(--accent);background:var(--adim);padding:2px 7px;border-radius:4px;white-space:nowrap;flex-shrink:0}
+.ref-area{width:100%;height:0;padding-bottom:56.25%;background:#000;position:relative;overflow:hidden;cursor:context-menu}
+.ref-area video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+.ref-tags{display:flex;flex-wrap:wrap;gap:3px;padding:8px 12px 0}
+.ref-tag{font-family:'DM Mono',monospace;font-size:.58rem;padding:2px 6px;border-radius:20px;background:var(--bg3);color:var(--text2);border:1px solid var(--border)}
+.ref-foot{padding:8px 12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.ref-note{flex:1;font-size:.7rem;color:var(--text2);font-style:italic;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ref-edit-btn{font-family:'DM Mono',monospace;font-size:.65rem;padding:3px 9px;border-radius:5px;border:1px solid var(--border2);background:transparent;color:var(--text2);cursor:pointer;transition:all .2s;white-space:nowrap}
+.ref-edit-btn:hover{border-color:var(--accent);color:var(--accent)}
+.ref-del{font-size:.65rem;font-family:'DM Mono',monospace;padding:3px 7px;border-radius:4px;border:1px solid rgba(255,107,157,.3);background:transparent;color:var(--accent3);cursor:pointer;transition:all .2s}
+.ref-del:hover{background:rgba(255,107,157,.1)}
+.no-ref{grid-column:1/-1;text-align:center;padding:60px 16px;color:var(--text3);font-size:.86rem;line-height:2}
+.no-ref .bi{font-size:3rem;margin-bottom:12px;opacity:.22}
+/* inline edit panel */
+.ref-edit-panel{background:var(--bg2);border-top:1px solid var(--border);padding:12px;display:none}
+.ref-edit-panel.open{display:block}
+.rp-label{font-family:'DM Mono',monospace;font-size:.59rem;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin-bottom:5px}
+.rp-group{margin-bottom:10px}
+.rp-fav{display:flex;align-items:center;gap:8px;cursor:pointer;padding:4px 0;margin-bottom:8px}
+.rp-heart{font-size:1.1rem;transition:transform .2s}.rp-fav:hover .rp-heart{transform:scale(1.15)}
+.rp-fav-lbl{font-size:.78rem;color:var(--text2)}
+.rp-tag-wrap{display:flex;flex-wrap:wrap;gap:4px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:5px;min-height:30px;cursor:text}
+.rp-tag-wrap:focus-within{border-color:var(--accent);box-shadow:0 0 0 2px var(--adim)}
+.rp-tag-pill{display:flex;align-items:center;gap:3px;font-family:'DM Mono',monospace;font-size:.63rem;padding:2px 6px;border-radius:20px;background:var(--bg4);color:var(--text2)}
+.rp-tag-rm{cursor:pointer;opacity:.5;font-size:.65rem}.rp-tag-rm:hover{opacity:1}
+.rp-tag-inp{border:none;background:transparent;outline:none;color:var(--text);font-family:'DM Mono',monospace;font-size:.68rem;flex:1;min-width:60px}
+.rp-textarea{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'Noto Sans JP',sans-serif;font-size:.75rem;padding:6px 8px;outline:none;transition:border .2s;resize:none}
+.rp-textarea:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--adim)}
+.rp-save-btn{width:100%;font-family:'Syne',sans-serif;font-weight:700;font-size:.72rem;padding:7px;border-radius:6px;background:var(--accent);color:#fff;border:none;cursor:pointer;transition:opacity .2s;margin-top:4px}
+.rp-save-btn:hover{opacity:.85}
+
+/* ── MODAL ── */
+#modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:300;align-items:center;justify-content:center;backdrop-filter:blur(12px);padding:8px}
+#modal-overlay.open{display:flex}
+#modal{background:var(--bg1);border:1px solid var(--border2);border-radius:18px;width:min(940px,100%);max-height:calc(100vh - 16px);overflow:hidden;display:flex;flex-direction:column;box-shadow:0 40px 100px rgba(0,0,0,.85),0 0 0 1px var(--adim)}
+.modal-hd{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+.modal-ttl{font-family:'Syne',sans-serif;font-weight:700;font-size:.9rem;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.modal-x{width:28px;height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .2s;flex-shrink:0}
+.modal-x:hover{border-color:var(--accent3);color:var(--accent3)}
+.modal-body{display:grid;grid-template-columns:1fr 280px;overflow:hidden;flex:1;min-height:0}
+@media(max-width:640px){.modal-body{grid-template-columns:1fr;overflow-y:auto}}
+.modal-player{background:#000;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+#modal-video{width:100%;flex:1;object-fit:contain;display:block;min-height:0;max-height:42vh}
+@media(max-width:640px){#modal-video{max-height:26vh;flex:none}}
+.pcontrols{background:var(--bg2);padding:8px 12px;display:flex;flex-direction:column;gap:7px;flex-shrink:0}
+.tl-wrap{position:relative;height:32px;cursor:pointer;user-select:none}
+#tl-bg{width:100%;height:5px;background:var(--bg4);border-radius:3px;position:absolute;top:13px}
+#tl-prog{height:5px;background:var(--accent);border-radius:3px;position:absolute;top:13px;width:0;pointer-events:none;box-shadow:0 0 7px var(--aglow)}
+#tl-range{position:absolute;top:13px;height:5px;background:rgba(192,132,252,.4);pointer-events:none}
+.tl-marker{position:absolute;top:7px;width:3px;height:18px;border-radius:2px;transform:translateX(-50%)}
+.m-in{background:var(--accent2)}.m-out{background:var(--accent3)}
+.time-row{display:flex;justify-content:space-between;align-items:center;font-family:'DM Mono',monospace;font-size:.65rem;color:var(--text2)}
+.range-ind{font-family:'DM Mono',monospace;font-size:.65rem;color:var(--accent2);background:var(--bg3);padding:2px 7px;border-radius:4px}
+.transport{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+.tp-btn{height:28px;border-radius:6px;border:1px solid var(--border);background:var(--bg3);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;font-size:.78rem;padding:0 8px;font-family:'DM Mono',monospace}
+.tp-btn:hover{background:var(--bg4);border-color:var(--border2)}
+.tp-btn.play{width:34px;height:34px;padding:0;font-size:.9rem;background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 0 12px var(--aglow)}
+.tp-btn.play:hover{opacity:.85}
+.tp-btn.spd{font-size:.65rem;color:var(--text2)}
+.tp-btn.spd.active{border-color:var(--accent2);color:var(--accent2);background:rgba(192,132,252,.1)}
+.mark-btns{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+.btn-in{font-family:'DM Mono',monospace;font-size:.65rem;padding:5px 8px;border-radius:5px;border:1px solid rgba(192,132,252,.5);background:rgba(192,132,252,.1);color:var(--accent2);cursor:pointer;transition:all .2s}
+.btn-out{font-family:'DM Mono',monospace;font-size:.65rem;padding:5px 8px;border-radius:5px;border:1px solid rgba(255,107,157,.5);background:rgba(255,107,157,.1);color:var(--accent3);cursor:pointer;transition:all .2s}
+.btn-in:hover{background:rgba(192,132,252,.2)}.btn-out:hover{background:rgba(255,107,157,.2)}
+.btn-gif{font-family:'Syne',sans-serif;font-weight:700;font-size:.68rem;letter-spacing:.03em;text-transform:uppercase;padding:6px 12px;border-radius:6px;background:var(--accent);color:#fff;border:none;cursor:pointer;box-shadow:0 0 10px var(--aglow);transition:opacity .2s;margin-left:auto}
+.btn-gif:hover{opacity:.85}.btn-gif:disabled{opacity:.35;cursor:not-allowed;box-shadow:none}
+/* modal sidebar */
+.modal-sb{border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+@media(max-width:640px){.modal-sb{border-left:none;border-top:1px solid var(--border)}}
+.msb-tabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0}
+.msb-tab{flex:1;padding:9px;text-align:center;font-family:'DM Mono',monospace;font-size:.68rem;color:var(--text3);cursor:pointer;border:none;background:transparent;transition:all .2s;letter-spacing:.05em}
+.msb-tab.active{color:var(--accent);border-bottom:2px solid var(--accent)}
+.msb-pane{flex:1;padding:12px;overflow-y:auto;display:none}
+.msb-pane.active{display:block}
+.flabel{font-family:'DM Mono',monospace;font-size:.59rem;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin-bottom:6px}
+.finput,.ftextarea{width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'Noto Sans JP',sans-serif;font-size:.78rem;padding:6px 8px;outline:none;transition:border .2s;resize:none}
+.finput:focus,.ftextarea:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--adim)}
+.fgroup{margin-bottom:12px}
+.fav-tog{display:flex;align-items:center;gap:8px;cursor:pointer;padding:5px 0}
+.heart{font-size:1.2rem;transition:transform .2s}.fav-tog:hover .heart{transform:scale(1.2)}
+.fav-tog-lbl{font-size:.8rem;color:var(--text2)}
+.tag-wrap{display:flex;flex-wrap:wrap;gap:4px;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px;min-height:32px;cursor:text}
+.tag-wrap:focus-within{border-color:var(--accent);box-shadow:0 0 0 2px var(--adim)}
+.tag-pill{display:flex;align-items:center;gap:3px;font-family:'DM Mono',monospace;font-size:.65rem;padding:2px 7px;border-radius:20px;background:var(--bg4);color:var(--text2)}
+.tag-rm{cursor:pointer;opacity:.5;font-size:.68rem}.tag-rm:hover{opacity:1}
+.tag-inp{border:none;background:transparent;outline:none;color:var(--text);font-family:'DM Mono',monospace;font-size:.7rem;flex:1;min-width:60px}
+.save-btn{width:100%;font-family:'Syne',sans-serif;font-weight:700;font-size:.73rem;letter-spacing:.03em;padding:7px;border-radius:6px;background:var(--bg3);color:var(--text);border:1px solid var(--border);cursor:pointer;transition:all .2s;margin-top:5px}
+.save-btn:hover{background:var(--bg4);border-color:var(--accent);color:var(--accent)}
+.clip-item{display:flex;align-items:center;gap:6px;padding:7px 8px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);margin-bottom:6px}
+.clip-range{font-family:'DM Mono',monospace;font-size:.68rem;color:var(--accent)}
+.clip-del{font-size:.68rem;color:var(--accent3);cursor:pointer;opacity:.5;transition:opacity .2s;background:none;border:none;flex-shrink:0}
+.clip-del:hover{opacity:1}
+
+/* ── CONTEXT MENU ── */
+#ctx-menu{position:fixed;background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:4px;z-index:400;box-shadow:0 8px 24px rgba(0,0,0,.6);display:none;min-width:160px}
+.ctx-item{padding:7px 12px;border-radius:5px;font-family:'DM Mono',monospace;font-size:.72rem;color:var(--text2);cursor:pointer;transition:background .15s;display:flex;align-items:center;gap:7px}
+.ctx-item:hover{background:var(--bg3);color:var(--text)}
+
+/* ── NOTIFICATION ── */
+#notif{
+  position:fixed;bottom:16px;right:16px;
+  background:var(--bg2);border:1px solid var(--border2);border-radius:10px;
+  padding:10px 36px 10px 14px;
+  font-family:'DM Mono',monospace;font-size:.72rem;color:var(--text);
+  z-index:500;transform:translateY(16px);opacity:0;
+  transition:transform .28s,opacity .28s;pointer-events:none;
+  max-width:300px;min-width:160px;
+  box-shadow:0 8px 24px rgba(0,0,0,.5),0 0 0 1px var(--adim);
+  user-select:text;-webkit-user-select:text;/* テキスト選択可能 */
+  line-height:1.5;word-break:break-all;
+}
+#notif.show{transform:translateY(0);opacity:1;pointer-events:all}
+#notif.error{border-color:rgba(255,107,157,.4);color:var(--accent3)}
+#notif.success{border-color:rgba(155,109,255,.4);color:var(--accent)}
+#notif-close{
+  position:absolute;top:7px;right:8px;
+  background:none;border:none;cursor:pointer;
+  color:var(--text3);font-size:.85rem;line-height:1;
+  padding:2px 4px;border-radius:4px;transition:color .15s;
+}
+#notif-close:hover{color:var(--text)}
+
+/* ── GIF PROGRESS OVERLAY ── */
+#gif-progress{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);
+  z-index:450;align-items:center;justify-content:center;backdrop-filter:blur(8px);
+}
+#gif-progress.show{display:flex}
+.gif-prog-card{
+  background:var(--bg1);border:1px solid var(--border2);border-radius:14px;
+  padding:28px 36px;text-align:center;min-width:220px;
+  box-shadow:0 20px 60px rgba(0,0,0,.8);
+}
+.gif-prog-title{font-family:'Syne',sans-serif;font-weight:700;font-size:.88rem;margin-bottom:14px;color:var(--text)}
+.gif-prog-bar-wrap{width:100%;height:6px;background:var(--bg4);border-radius:3px;overflow:hidden;margin-bottom:8px}
+.gif-prog-bar{height:100%;background:var(--accent);border-radius:3px;width:0;transition:width .15s;box-shadow:0 0 8px var(--aglow)}
+.gif-prog-label{font-family:'DM Mono',monospace;font-size:.65rem;color:var(--text3)}
+
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--bg4);border-radius:10px}
+</style>
+</head>
+<body>
+
+<!-- GIF PROGRESS OVERLAY -->
+<div id="gif-progress">
+  <div class="gif-prog-card">
+    <div class="gif-prog-title">🎬 MP4 生成中...</div>
+    <div class="gif-prog-bar-wrap"><div class="gif-prog-bar" id="gif-prog-bar"></div></div>
+    <div class="gif-prog-label" id="gif-prog-label">動画を録画しています</div>
+  </div>
+</div>
+
+<!-- TOPBAR -->
+<div id="topbar">
+  <button class="sb-toggle" onclick="toggleSidebar()">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+  </button>
+  <div class="logo">mov<em>Ref</em></div>
+  <div class="view-tabs">
+    <button class="tab-btn active" onclick="switchView('mov')">mov</button>
+    <button class="tab-btn" onclick="switchView('ref')">Ref</button>
+  </div>
+  <div class="tb-spacer"></div>
+  <div class="search-wrap">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input id="search-input" type="text" placeholder="検索..." oninput="filterVideos()">
+  </div>
+  <div class="connect-btns">
+    <button class="btn-conn" id="od-btn" onclick="odSignIn()"><span class="dot" id="od-dot"></span>OneDrive</button>
+    <button class="btn-conn" id="od-folder-btn" onclick="odPickFolder()" style="display:none">📁 フォルダ読込</button>
+    <button class="btn-conn" id="od-signout-btn" onclick="odSignOut()" style="display:none">サインアウト</button>
+  </div>
+</div>
+
+<div id="sb-overlay" onclick="closeMobileSB()"></div>
+
+<!-- SIDEBAR -->
+<div id="sidebar">
+  <div class="sb-section">
+    <div class="sb-sec-hd"><span class="sb-sec-title">📁 フォルダ</span></div>
+    <div class="folder-item active" id="fi-all" onclick="selectFilter('all')"><span>🎬</span> すべての動画</div>
+    <div class="folder-item" id="fi-fav" onclick="selectFilter('fav')"><span>❤️</span> お気に入り</div>
+    <div class="folder-item" id="fi-ref" onclick="selectFilter('ref')"><span>🎞️</span> Refクリップあり</div>
+  </div>
+  <div class="sb-section">
+    <div class="sb-sec-hd">
+      <span class="sb-sec-title">🏷️ タグ</span>
+      <select class="sb-sec-sort" id="tag-sort-sel" onchange="renderSBTags()">
+        <option value="name">名前順</option>
+        <option value="count">動画数順</option>
+        <option value="custom">カスタム</option>
+      </select>
+    </div>
+    <div class="tag-list" id="sb-tags"></div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div id="main">
+
+  <!-- MOV VIEW -->
+  <div id="view-mov" class="view-panel">
+    <div class="toolbar">
+      <span class="toolbar-label">SIZE</span>
+      <div class="slider-wrap">
+        <input type="range" class="sz-slider" id="sz-slider" min="1" max="6" value="2" step="1" oninput="onSizeSlider(this.value)">
+        <span class="sz-label" id="sz-label">2列</span>
+      </div>
+      <span class="toolbar-label">SORT</span>
+      <select class="sort-sel" id="sort-sel" onchange="sortVideos(this.value)">
+        <option value="name">名前順</option>
+        <option value="date">実施時期順</option>
+        <option value="fav">お気に入り優先</option>
+        <option value="random">ランダム</option>
+      </select>
+      <button class="conte-toggle-btn" id="conte-toggle" onclick="toggleConteMode()">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><rect x="16" y="2" width="6" height="6" rx="1"/><rect x="2" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/><rect x="16" y="9" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="16" width="6" height="6" rx="1"/><rect x="16" y="16" width="6" height="6" rx="1"/></svg>
+        コンテ表示
+      </button>
+      <span class="tb-spacer"></span>
+      <span class="tb-count" id="v-count">0 本</span>
+    </div>
+    <div class="v-grid" id="video-grid"></div>
+  </div>
+
+  <!-- REF VIEW -->
+  <div id="view-ref" class="view-panel">
+    <div class="ref-toolbar">
+      <span class="toolbar-label">SORT</span>
+      <select class="sort-sel" id="ref-sort-sel" onchange="renderRef()">
+        <option value="name">名前順</option>
+        <option value="date">実施時期順</option>
+        <option value="fav">お気に入り優先</option>
+        <option value="random">ランダム</option>
+      </select>
+      <span class="tb-spacer"></span>
+      <span class="tb-count" id="ref-count">0 クリップ</span>
+    </div>
+    <div class="ref-grid" id="ref-grid"></div>
+  </div>
+
+</div>
+
+<!-- MODAL -->
+<div id="modal-overlay" onclick="handleOverlayClick(event)">
+  <div id="modal">
+    <div class="modal-hd">
+      <div class="modal-ttl" id="modal-title">—</div>
+      <button class="modal-x" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-player">
+        <video id="modal-video" controls></video>
+        <div class="pcontrols">
+          <div class="tl-wrap" id="tl-wrap" onclick="seekTL(event)">
+            <div id="tl-bg"></div><div id="tl-prog"></div>
+            <div id="tl-range" style="left:0;width:0"></div>
+            <div class="tl-marker m-in" id="m-in" style="left:0;display:none"></div>
+            <div class="tl-marker m-out" id="m-out" style="left:0;display:none"></div>
+          </div>
+          <div class="time-row">
+            <span id="t-cur">0:00</span>
+            <span id="t-range" class="range-ind" style="display:none">—</span>
+            <span id="t-tot">0:00</span>
+          </div>
+          <div class="transport">
+            <button class="tp-btn" onclick="skip(-5)" title="-5秒">«</button>
+            <button class="tp-btn play" id="play-btn" onclick="togglePlay()">▶</button>
+            <button class="tp-btn" onclick="skip(5)" title="+5秒">»</button>
+            <button class="tp-btn spd" id="spd-05" onclick="setSpeed(0.5)" title="0.5倍速">0.5×</button>
+            <button class="tp-btn spd active" id="spd-10" onclick="setSpeed(1.0)" title="通常速度">1×</button>
+            <button class="tp-btn spd" id="spd-20" onclick="setSpeed(2.0)" title="2倍速">2×</button>
+            <div class="mark-btns">
+              <button class="btn-in" onclick="markIn()">[ IN</button>
+              <button class="btn-out" onclick="markOut()">OUT ]</button>
+              <button class="btn-gif" id="btn-gif" onclick="addRef()" disabled>＋Ref</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-sb">
+        <div class="msb-tabs">
+          <button class="msb-tab active" onclick="switchMTab('info')">情報</button>
+          <button class="msb-tab" onclick="switchMTab('clips')">Refクリップ</button>
+        </div>
+        <div class="msb-pane active" id="tab-info">
+          <div class="fgroup">
+            <div class="fav-tog" onclick="toggleFav()">
+              <span class="heart" id="modal-heart">🤍</span>
+              <span class="fav-tog-lbl" id="fav-lbl">お気に入りに追加</span>
+            </div>
+          </div>
+          <div class="fgroup">
+            <div class="flabel">クライアント</div>
+            <input type="text" class="finput" id="v-client" placeholder="クライアント名...">
+          </div>
+          <div class="fgroup">
+            <div class="flabel">実施時期</div>
+            <input type="month" class="finput" id="v-period">
+          </div>
+          <div class="fgroup">
+            <div class="flabel">タグ</div>
+            <div class="tag-wrap" id="tag-wrap" onclick="focusTagInp()">
+              <input type="text" class="tag-inp" id="tag-inp" placeholder="入力してEnter" onkeydown="handleTag(event)">
+            </div>
+          </div>
+          <div class="fgroup">
+            <div class="flabel">メモ</div>
+            <textarea class="ftextarea" id="v-memo" rows="4" placeholder="メモを入力..."></textarea>
+          </div>
+          <button class="save-btn" onclick="saveMeta()">✓ 保存</button>
+        </div>
+        <div class="msb-pane" id="tab-clips">
+          <div id="clips-list"></div>
+          <div id="no-clips" style="text-align:center;padding:20px 10px;color:var(--text3);font-size:.75rem;line-height:2">IN/OUTをマーク →「＋Ref」</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- CONTEXT MENU (Ref GIF download) -->
+<div id="ctx-menu">
+  <div class="ctx-item" id="ctx-gif-dl">🎬 MP4 としてダウンロード</div>
+</div>
+
+<div id="notif"><button id="notif-close" onclick="closeNotif()">✕</button><span id="notif-text"></span></div>
+
+<script>
+// ── STATE ────────────────────────────────────────────
+let videos=[], meta={}, curVid=null, curView='mov';
+let sbFilter='all', filterTag='';
+let inPt=null, outPt=null;
+let conteMode=false;
+let curCols=2;
+let sbVisible=window.innerWidth>=768;
+let refEditOpen=null;
+let ctxClip=null; // for GIF context menu
+let tagOrder=[]; // custom tag ordering
+
+const store={
+  load(){
+    try{meta=JSON.parse(localStorage.getItem('movref_meta')||'{}')}catch{meta={}}
+    try{tagOrder=JSON.parse(localStorage.getItem('movref_tagorder')||'[]')}catch{tagOrder=[]}
+  },
+  save(){
+    localStorage.setItem('movref_meta',JSON.stringify(meta));
+    localStorage.setItem('movref_tagorder',JSON.stringify(tagOrder));
+  }
+};
+function M(id){
+  if(!meta[id])meta[id]={fav:false,tags:[],memo:'',clips:[],client:'',period:''};
+  // migrate old records
+  if(!meta[id].client)meta[id].client='';
+  if(!meta[id].period)meta[id].period='';
+  return meta[id];
+}
+
+// ── SIDEBAR ──────────────────────────────────────────
+function toggleSidebar(){
+  if(window.innerWidth<768){
+    const s=document.getElementById('sidebar'),o=document.getElementById('sb-overlay');
+    s.classList.toggle('open');o.classList.toggle('open',s.classList.contains('open'));
+  } else {sbVisible=!sbVisible;applyDesktopSB()}
+}
+function applyDesktopSB(){
+  const s=document.getElementById('sidebar'),m=document.getElementById('main');
+  if(sbVisible){s.classList.remove('hidden');m.style.marginLeft='var(--sw)'}
+  else{s.classList.add('hidden');m.style.marginLeft='0'}
+}
+function closeMobileSB(){
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sb-overlay').classList.remove('open');
+}
+window.addEventListener('resize',()=>{
+  if(window.innerWidth>=768){closeMobileSB();applyDesktopSB()}
+  else document.getElementById('main').style.marginLeft='0';
+});
+
+// filter is toggle: clicking active filter deactivates it
+function selectFilter(f){
+  if(f==='all'){
+    sbFilter='all';filterTag='';
+  } else if(sbFilter===f){
+    // toggle off → back to all
+    sbFilter='all';
+  } else {
+    sbFilter=f;filterTag='';
+  }
+  updateFilterUI();renderGallery();if(window.innerWidth<768)closeMobileSB();
+}
+function filterByTag(t){
+  if(filterTag===t){filterTag='';sbFilter='all';}
+  else{filterTag=t;sbFilter='tag';}
+  updateFilterUI();renderGallery();if(window.innerWidth<768)closeMobileSB();
+}
+function updateFilterUI(){
+  ['all','fav','ref'].forEach(f=>{
+    const el=document.getElementById('fi-'+f);
+    if(el)el.classList.toggle('active',sbFilter===f);
+  });
+  renderSBTags();
+}
+
+function renderSBTags(){
+  const sortBy=document.getElementById('tag-sort-sel')?.value||'name';
+  const allTags=new Map();
+  videos.forEach(v=>M(v.id).tags.forEach(t=>{allTags.set(t,(allTags.get(t)||0)+1)}));
+  let tags=[...allTags.keys()];
+  tags.forEach(t=>{if(!tagOrder.includes(t))tagOrder.push(t)});
+  tagOrder=tagOrder.filter(t=>allTags.has(t));
+
+  if(sortBy==='name') tags.sort((a,b)=>a.localeCompare(b,'ja'));
+  else if(sortBy==='count') tags.sort((a,b)=>allTags.get(b)-allTags.get(a));
+  else tags=[...tagOrder];
+
+  const w=document.getElementById('sb-tags');
+  w.innerHTML='';
+  tags.forEach(t=>{
+    const count=allTags.get(t)||0;
+    const chip=document.createElement('span');
+    chip.className='tag-chip'+(filterTag===t?' active':'');
+    chip.draggable=true;chip.dataset.tag=t;
+    chip.innerHTML=`${t} <span style="opacity:.55;font-size:.58rem">${count}</span>`;
+    chip.onclick=()=>filterByTag(t);
+    chip.addEventListener('dragstart',e=>{e.dataTransfer.setData('text/plain',t);chip.style.opacity='.4'});
+    chip.addEventListener('dragend',()=>{chip.style.opacity='1'});
+    chip.addEventListener('dragover',e=>e.preventDefault());
+    chip.addEventListener('drop',e=>{
+      e.preventDefault();
+      const from=e.dataTransfer.getData('text/plain'),to=t;
+      if(from===to)return;
+      const fi=tagOrder.indexOf(from),ti=tagOrder.indexOf(to);
+      if(fi>-1&&ti>-1){tagOrder.splice(fi,1);tagOrder.splice(ti,0,from);}
+      store.save();
+      document.getElementById('tag-sort-sel').value='custom';
+      renderSBTags();
+    });
+    w.appendChild(chip);
+  });
+}
+
+// ── SIZE SLIDER ───────────────────────────────────────
+function onSizeSlider(val){
+  val=parseInt(val);curCols=val;
+  const grid=document.getElementById('video-grid');
+  const gap=Math.max(8,18-val*2)+'px';
+  const fs=[4,2,1,0,0,0][Math.min(val-1,5)];
+  grid.style.setProperty('--cols',val);
+  grid.style.setProperty('--gap',gap);
+  grid.style.setProperty('--card-fs',fs+'px');
+  grid.querySelectorAll('.vcard').forEach(c=>c.classList.toggle('compact',val>=5));
+  document.getElementById('sz-label').textContent=val+'列';
+}
+
+// ── CONTE TOGGLE ──────────────────────────────────────
+function toggleConteMode(){
+  conteMode=!conteMode;
+  document.getElementById('conte-toggle').classList.toggle('active',conteMode);
+  renderGallery();
+}
+
+// ── VIEW SWITCH ───────────────────────────────────────
+function switchView(v){
+  curView=v;
+  document.getElementById('view-mov').style.display=(v==='mov')?'block':'none';
+  document.getElementById('view-ref').style.display=(v==='ref')?'block':'none';
+  document.querySelectorAll('.tab-btn').forEach((b,i)=>b.classList.toggle('active',['mov','ref'][i]===v));
+  if(v==='ref')renderRef();
+  if(window.innerWidth<768)closeMobileSB();
+}
+
+// ── NOTIFY (persistent, close with ×) ────────────────
+function notify(msg, type='success'){
+  const el=document.getElementById('notif');
+  const txt=document.getElementById('notif-text');
+  txt.textContent=msg;
+  el.className='show '+(type==='error'?'error':'success');
+}
+function closeNotif(){
+  const el=document.getElementById('notif');
+  el.className=el.className.replace('show','').trim();
+}
+
+// ── DEMO DATA ─────────────────────────────────────────
+function loadDemo(){
+  const d=[
+    {id:'d1',name:'Sakamoto_days_OP.mp4',mod:'2025-03-12',tags:['anime','OP'],fav:true,client:'Netflix Japan',period:'2025-03'},
+    {id:'d2',name:'Product_reel_v3.mp4',mod:'2025-04-01',tags:['広告','final'],client:'Sony',period:'2025-04'},
+    {id:'d3',name:'Shibuya_BG_loop.mp4',mod:'2025-02-20',tags:['BGvideo'],client:'',period:'2025-02'},
+    {id:'d4',name:'Interview_raw.mp4',mod:'2025-04-10',tags:['interview'],client:'Dentsu',period:'2025-04'},
+    {id:'d5',name:'CM_draft_v1.mp4',mod:'2025-05-01',tags:['広告','draft'],client:'Toyota',period:'2025-05'},
+    {id:'d6',name:'Title_animation.mp4',mod:'2025-01-15',tags:['motion'],client:'',period:'2025-01'},
+    {id:'d7',name:'Kyo_compilation.mp4',mod:'2025-03-28',tags:['anime','キャラ'],fav:true,client:'Shueisha',period:'2025-03'},
+    {id:'d8',name:'OOH_teaser_30s.mp4',mod:'2025-04-22',tags:['広告','OOH'],client:'JR East',period:'2025-04'},
+  ];
+  d.forEach(it=>{
+    const m=M(it.id);
+    m.tags=it.tags||[];if(it.fav)m.fav=true;
+    m.client=it.client||'';m.period=it.period||'';
+    if(!videos.find(v=>v.id===it.id))
+      videos.push({id:it.id,name:it.name,source:'demo',modified:it.mod,url:null,duration:null});
+  });
+  store.save();renderAll();notify('✓ デモデータを読み込みました');
+}
+
+function connectGDrive(){
+  notify('Google Drive: APIキー設定後にOAuth認証が利用できます');
+  document.getElementById('gd-btn').classList.add('connected');
+  document.getElementById('gd-dot').style.cssText='background:var(--accent);box-shadow:0 0 5px var(--accent)';
+}
+function connectOneDrive(){
+  notify('OneDrive: Microsoft Graph API設定後に利用できます');
+  document.getElementById('od-btn').classList.add('connected');
+  document.getElementById('od-dot').style.cssText='background:var(--accent);box-shadow:0 0 5px var(--accent)';
+}
+
+function loadLocalFile(id,file){
+  const url=URL.createObjectURL(file);
+  const v=videos.find(v=>v.id===id);
+  if(v){
+    v.url=url;
+    // Read file creation date → prefill period
+    const m=M(id);
+    if(!m.period&&file.lastModified){
+      const d=new Date(file.lastModified);
+      m.period=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      store.save();
+    }
+    const tmp=document.createElement('video');tmp.src=url;
+    tmp.addEventListener('loadedmetadata',()=>{v.duration=tmp.duration;tmp.src='';renderAll()},{once:true});
+  }
+  renderAll();
+}
+
+// ── RENDER ALL ────────────────────────────────────────
+function renderAll(){
+  renderSBTags();
+  document.getElementById('view-mov').style.display=(curView==='mov')?'block':'none';
+  document.getElementById('view-ref').style.display=(curView==='ref')?'block':'none';
+  renderGallery();
+  if(curView==='ref')renderRef();
+}
+
+function getFiltered(){
+  let list=[...videos];
+  const q=document.getElementById('search-input').value.toLowerCase();
+  if(q) list=list.filter(v=>v.name.toLowerCase().includes(q)||M(v.id).client.toLowerCase().includes(q));
+  if(sbFilter==='fav') list=list.filter(v=>M(v.id).fav);
+  if(sbFilter==='ref') list=list.filter(v=>M(v.id).clips.length>0);
+  if(sbFilter==='tag'&&filterTag) list=list.filter(v=>M(v.id).tags.includes(filterTag));
+  return list;
+}
+
+function applySortToList(list, by){
+  const sorted=[...list];
+  if(by==='name') sorted.sort((a,b)=>a.name.localeCompare(b.name,'ja'));
+  else if(by==='date') sorted.sort((a,b)=>(M(b.id).period||'').localeCompare(M(a.id).period||''));
+  else if(by==='fav') sorted.sort((a,b)=>(M(b.id).fav?1:0)-(M(a.id).fav?1:0));
+  else if(by==='random') sorted.sort(()=>Math.random()-.5);
+  return sorted;
+}
+
+function sortVideos(by){
+  videos=applySortToList(videos,by);
+  renderGallery();
+}
+
+// ── GALLERY ───────────────────────────────────────────
+function renderGallery(){
+  const grid=document.getElementById('video-grid');
+  const list=getFiltered();
+  const sortBy=document.getElementById('sort-sel')?.value||'name';
+  const sorted=applySortToList(list,sortBy);
+  const compact=curCols>=5;
+  const fs=[4,2,1,0,0,0][Math.min(curCols-1,5)];
+  grid.style.setProperty('--cols',curCols);
+  grid.style.setProperty('--gap',Math.max(8,18-curCols*2)+'px');
+  grid.style.setProperty('--card-fs',fs+'px');
+  document.getElementById('v-count').textContent=sorted.length+' 本';
+  if(!sorted.length){
+    grid.innerHTML=`<div class="empty"><div class="bi">🎬</div>
+      <p>動画がありません。<br>デモデータを読み込んでください。</p>
+      <button class="demo-btn" onclick="loadDemo()">デモデータを読み込む</button></div>`;
+    return;
+  }
+  grid.innerHTML='';
+  sorted.forEach(v=>{
+    const card=buildMovCard(v,compact);
+    grid.appendChild(card);
+    if(conteMode&&v.url) scheduleConte(v,card);
+  });
+}
+
+function buildMovCard(v,compact){
+  const m=M(v.id);
+  const tags=m.tags.slice(0,4).map(t=>`<span class="card-tag">${t}</span>`).join('');
+  const dur=v.duration!=null?fmt(v.duration):'--:--';
+  const src=v.url||'';
+  const card=document.createElement('div');
+  card.className='vcard'+(compact?' compact':'')+(conteMode?' conte-mode':'');
+  card.dataset.id=v.id;
+
+  // Normal thumb
+  let thumbHTML='';
+  if(!conteMode){
+    thumbHTML=`<div class="card-thumb">
+      ${src
+        ?`<video class="thumb-static" src="${src}" muted preload="metadata" onloadedmetadata="this.currentTime=Math.min(2,this.duration*.1)"></video>
+           <video class="thumb-preview" src="${src}" muted loop playsinline></video>`
+        :`<div class="thumb-ph">🎬</div>`}
+      <span class="card-dur">${dur}</span>
+      <button class="fav-btn${m.fav?' on':''}" onclick="qFav(event,'${v.id}')">${m.fav?'❤️':'🤍'}</button>
+    </div>`;
+  }
+
+  // Conte strip 3×3=9 cells
+  let conteHTML='';
+  if(conteMode){
+    const N=9;
+    const dur2=v.duration||60;
+    const step=dur2/N;
+    let cells='';
+    for(let i=0;i<N;i++){
+      const tc=fmt(step*i+step/2);
+      cells+=`<div class="cs-cell" id="csc-${v.id}-${i}">
+        <div class="cs-cell-num">C${String(i+1).padStart(2,'0')}</div>
+        <div class="cs-cell-tc">${tc}</div>
+        ${src
+          ?`<canvas id="cscanvas-${v.id}-${i}" width="240" height="135"></canvas>
+            <div class="cs-spin-wrap" id="csspin-${v.id}-${i}"><div class="cs-spin"></div></div>`
+          :`<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;opacity:.2">🎬</div>`}
+      </div>`;
+    }
+    conteHTML=`<div class="conte-strip" style="aspect-ratio:16/9">${cells}</div>`;
+  }
+
+  // meta info
+  const metaItems=[];
+  if(m.client) metaItems.push(`<span class="card-meta-item">🏢 ${m.client}</span>`);
+  if(m.period) metaItems.push(`<span class="card-meta-item">📅 ${m.period}</span>`);
+  if(v.source==='demo') metaItems.push(`<span class="card-meta-item">📁 Demo</span>`);
+  if(m.clips.length) metaItems.push(`<span class="card-meta-item">🎞️ ${m.clips.length}</span>`);
+
+  card.innerHTML=`${thumbHTML}${conteHTML}
+    <div class="card-body">
+      <div class="card-title">${v.name}</div>
+      ${metaItems.length?`<div class="card-meta">${metaItems.join('')}</div>`:''}
+      ${m.memo?`<div class="card-memo">${m.memo.slice(0,60)}${m.memo.length>60?'…':''}</div>`:''}
+      <div class="card-tags">${tags}</div>
+    </div>`;
+
+  // hover preview
+  if(!conteMode&&src){
+    card.addEventListener('mouseenter',()=>{
+      const pv=card.querySelector('.thumb-preview');
+      if(pv){pv.currentTime=0;pv.play().catch(()=>{})}
+    });
+    card.addEventListener('mouseleave',()=>{
+      const pv=card.querySelector('.thumb-preview');
+      if(pv){pv.pause();pv.currentTime=0}
+    });
+  }
+  // fav btn in conte mode
+  if(conteMode){
+    const fb=document.createElement('button');
+    fb.className='fav-btn'+(m.fav?' on':'');
+    fb.style.cssText='position:absolute;top:6px;right:6px;z-index:3;opacity:'+(m.fav?'1':'0');
+    fb.innerHTML=m.fav?'❤️':'🤍';fb.onclick=e=>qFav(e,v.id);
+    card.style.position='relative';card.appendChild(fb);
+    card.addEventListener('mouseenter',()=>{fb.style.opacity='1'});
+    card.addEventListener('mouseleave',()=>{if(!M(v.id).fav)fb.style.opacity='0'});
+  }
+  card.addEventListener('click',e=>{
+    if(e.target.classList.contains('fav-btn')||e.target.closest('.fav-btn'))return;
+    openModal(v.id);
+  });
+  return card;
+}
+
+// ── CONTE FRAME CAPTURE (9 frames, 240×135 canvas) ────
+function scheduleConte(v,card){
+  const obs=new IntersectionObserver(entries=>{
+    if(entries[0].isIntersecting){obs.disconnect();captureConteFrames(v,card)}
+  },{threshold:0.05});
+  obs.observe(card);
+}
+function captureConteFrames(v,card){
+  const N=9;
+  const dur=v.duration||60;
+  const step=dur/N;
+  const vid=document.createElement('video');
+  vid.src=v.url;vid.muted=true;vid.preload='auto';
+  let idx=0;
+  function next(){if(idx>=N)return;vid.currentTime=step*idx+step/2}
+  vid.addEventListener('seeked',()=>{
+    const i=idx;
+    const canvas=document.getElementById(`cscanvas-${v.id}-${i}`);
+    const spin=document.getElementById(`csspin-${v.id}-${i}`);
+    if(canvas){
+      const ctx=canvas.getContext('2d');
+      const vw=vid.videoWidth||240,vh=vid.videoHeight||135;
+      const cw=240,ch=135;
+      const scale=Math.min(cw/vw,ch/vh);
+      const dw=vw*scale,dh=vh*scale;
+      ctx.fillStyle='#000';ctx.fillRect(0,0,cw,ch);
+      try{ctx.drawImage(vid,(cw-dw)/2,(ch-dh)/2,dw,dh)}catch(e){}
+      if(spin)spin.style.display='none';
+    }
+    idx++;if(idx<N)next();else vid.src='';
+  });
+  vid.addEventListener('loadedmetadata',()=>{if(!v.duration)v.duration=vid.duration;next()},{once:true});
+  vid.addEventListener('error',()=>{for(let i=0;i<N;i++){const s=document.getElementById(`csspin-${v.id}-${i}`);if(s)s.style.display='none'}});
+}
+
+function qFav(e,id){
+  e.stopPropagation();const m=M(id);m.fav=!m.fav;store.save();renderGallery();
+  notify(m.fav?'❤️ お気に入りに追加':'🤍 お気に入りを解除');
+}
+function filterVideos(){renderGallery()}
+
+// ── REF VIEW ──────────────────────────────────────────
+function renderRef(){
+  const grid=document.getElementById('ref-grid');
+  const sortBy=document.getElementById('ref-sort-sel')?.value||'name';
+  let all=[];
+  videos.forEach(v=>M(v.id).clips.forEach((c,i)=>all.push({video:v,clip:c,ci:i})));
+  // sort
+  if(sortBy==='name') all.sort((a,b)=>a.video.name.localeCompare(b.video.name,'ja'));
+  else if(sortBy==='date') all.sort((a,b)=>(M(b.video.id).period||'').localeCompare(M(a.video.id).period||''));
+  else if(sortBy==='fav') all.sort((a,b)=>(M(b.video.id).fav?1:0)-(M(a.video.id).fav?1:0));
+  else if(sortBy==='random') all.sort(()=>Math.random()-.5);
+
+  document.getElementById('ref-count').textContent=all.length+' クリップ';
+  if(!all.length){
+    grid.innerHTML=`<div class="no-ref"><div class="bi">🎞️</div>まだRefクリップがありません。<br>動画を開いてIN/OUTをマークし「＋Ref」してください。</div>`;return;
+  }
+  grid.innerHTML='';
+  all.forEach(({video,clip,ci})=>{
+    const key=`${video.id}-${ci}`;
+    const src=video.url||'';
+    const m=M(video.id);
+    const tags=m.tags.map(t=>`<span class="ref-tag">${t}</span>`).join('');
+    const isOpen=refEditOpen===key;
+    const card=document.createElement('div');
+    card.className='ref-card';card.id='ref-card-'+key;
+    card.innerHTML=`
+      <div class="ref-head">
+        <span class="ref-title">${video.name}</span>
+        <span class="ref-range">${fmt(clip.in)} → ${fmt(clip.out)}</span>
+      </div>
+      <div class="ref-area" id="refarea-${key}">
+        ${src
+          ?`<video id="refvid-${key}" src="${src}" autoplay muted loop playsinline
+               onloadedmetadata="this.currentTime=${clip.in};this._ci=${clip.in};this._co=${clip.out}"
+               ontimeupdate="if(this.currentTime>=this._co||this.currentTime<this._ci-0.3){this.currentTime=this._ci}"
+               style="width:100%;height:100%;object-fit:contain"></video>`
+          :`<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:var(--text3);font-size:.8rem;gap:4px">🎬<span>未ロード</span></div>`}
+      </div>
+      ${tags?`<div class="ref-tags">${tags}</div>`:''}
+      <div class="ref-foot">
+        <span class="ref-note">${clip.note||'（メモなし）'}</span>
+        <button class="ref-edit-btn" onclick="toggleRefEdit('${key}')">✏️ 編集</button>
+        <button class="ref-del" onclick="delRef('${video.id}',${ci})">削除</button>
+      </div>
+      <div class="ref-edit-panel${isOpen?' open':''}" id="rep-${key}">
+        <div class="rp-group">
+          <div class="rp-fav" onclick="toggleRefFav('${video.id}','${key}')">
+            <span class="rp-heart" id="rph-${key}">${m.fav?'❤️':'🤍'}</span>
+            <span class="rp-fav-lbl" id="rpfl-${key}">${m.fav?'お気に入り登録済み':'お気に入りに追加'}</span>
+          </div>
+        </div>
+        <div class="rp-group">
+          <div class="rp-label">タグ</div>
+          <div class="rp-tag-wrap" id="rptw-${key}" onclick="document.getElementById('rpti-${key}').focus()">
+            ${m.tags.map((t,ti)=>`<span class="rp-tag-pill">${t}<span class="rp-tag-rm" onclick="rpRmTag('${video.id}','${key}',${ti})">✕</span></span>`).join('')}
+            <input class="rp-tag-inp" id="rpti-${key}" placeholder="タグ入力してEnter" onkeydown="rpHandleTag(event,'${video.id}','${key}')">
+          </div>
+        </div>
+        <div class="rp-group">
+          <div class="rp-label">クリップメモ</div>
+          <textarea class="rp-textarea" id="rpta-${key}" rows="2" placeholder="このクリップのメモ...">${clip.note||''}</textarea>
+        </div>
+        <div class="rp-group">
+          <div class="rp-label">動画メモ</div>
+          <textarea class="rp-textarea" id="rpma-${key}" rows="2" placeholder="動画全体のメモ...">${m.memo||''}</textarea>
+        </div>
+        <button class="rp-save-btn" onclick="saveRefEdit('${video.id}','${key}',${ci})">✓ 保存</button>
+      </div>`;
+    // context menu for GIF download — querySelector AFTER innerHTML is set
+    const area=card.querySelector('.ref-area');
+    if(area){
+      area.addEventListener('contextmenu',e=>{
+        e.preventDefault();e.stopPropagation();
+        const vidEl=area.querySelector('video');
+        const liveSrc=vidEl?.src||src;
+        if(!liveSrc||liveSrc===location.href||liveSrc===''){
+          ctxClip=null;
+          notify('動画ファイルを先にロードしてください','error');return;
+        }
+        ctxClip={src:liveSrc,clip,key};
+        showCtxMenu(e.clientX,e.clientY,e);
+      });
+    }
+    grid.appendChild(card);
+  });
+}
+
+function toggleRefEdit(key){
+  refEditOpen=(refEditOpen===key)?null:key;renderRef();
+}
+function toggleRefFav(vid,key){
+  const m=M(vid);m.fav=!m.fav;store.save();
+  const h=document.getElementById('rph-'+key),l=document.getElementById('rpfl-'+key);
+  if(h)h.textContent=m.fav?'❤️':'🤍';if(l)l.textContent=m.fav?'お気に入り登録済み':'お気に入りに追加';
+  notify(m.fav?'❤️ お気に入りに追加':'🤍 お気に入りを解除');
+}
+function rpRmTag(vid,key,ti){
+  M(vid).tags.splice(ti,1);store.save();renderRefTagPills(vid,key);renderGallery();renderSBTags();
+}
+function rpHandleTag(e,vid,key){
+  if(e.key==='Enter'||e.key===','){
+    e.preventDefault();const v=e.target.value.trim().replace(/,$/,'');if(!v)return;
+    const m=M(vid);if(!m.tags.includes(v))m.tags.push(v);
+    e.target.value='';store.save();renderRefTagPills(vid,key);renderGallery();renderSBTags();
+  }
+}
+function renderRefTagPills(vid,key){
+  const w=document.getElementById('rptw-'+key),inp=document.getElementById('rpti-'+key);
+  if(!w||!inp)return;
+  w.querySelectorAll('.rp-tag-pill').forEach(e=>e.remove());
+  M(vid).tags.forEach((t,i)=>{
+    const el=document.createElement('span');el.className='rp-tag-pill';
+    el.innerHTML=`${t}<span class="rp-tag-rm" onclick="rpRmTag('${vid}','${key}',${i})">✕</span>`;
+    w.insertBefore(el,inp);
+  });
+}
+function saveRefEdit(vid,key,ci){
+  const m=M(vid);
+  const ta=document.getElementById('rpta-'+key),ma=document.getElementById('rpma-'+key);
+  if(ta)m.clips[ci].note=ta.value;if(ma)m.memo=ma.value;
+  store.save();
+  refEditOpen=null; // close panel and return to card list
+  renderRef();renderGallery();notify('✓ 保存しました');
+}
+function delRef(vid,ci){M(vid).clips.splice(ci,1);store.save();renderRef();renderGallery();notify('Refクリップを削除しました')}
+
+// ── CONTEXT MENU (GIF download) ───────────────────────
+function showCtxMenu(x,y,e){
+  if(e){e.preventDefault();e.stopPropagation();}
+  const m=document.getElementById('ctx-menu');
+  // keep menu inside viewport
+  const menuW=180,menuH=48;
+  const left=Math.min(x,window.innerWidth-menuW-8);
+  const top=Math.min(y,window.innerHeight-menuH-8);
+  m.style.left=left+'px';m.style.top=top+'px';m.style.display='block';
+}
+function hideCtxMenu(){
+  const m=document.getElementById('ctx-menu');
+  if(m)m.style.display='none';
+  ctxClip=null;
+}
+// close ctx menu on outside click (but not on the menu itself)
+document.addEventListener('click',e=>{
+  const menu=document.getElementById('ctx-menu');
+  if(menu&&!menu.contains(e.target))hideCtxMenu();
+});
+document.getElementById('ctx-gif-dl').addEventListener('click',async e=>{
+  e.stopPropagation();
+  // Save clip info BEFORE hideCtxMenu nulls ctxClip
+  if(!ctxClip||!ctxClip.src){
+    hideCtxMenu();
+    notify('動画ファイルをロードしてから右クリックしてください','error');return;
+  }
+  const savedSrc=ctxClip.src;
+  const savedClip={...ctxClip.clip};
+  const savedKey=ctxClip.key;
+  hideCtxMenu();
+  try{
+    await generateMp4(savedSrc,savedClip.in,savedClip.out,savedKey);
+  }catch(err){
+    document.getElementById('gif-progress').classList.remove('show');
+    notify('MP4生成エラー: '+err.message,'error');
+  }
+});
+
+// ── mp4-muxer loader (lazy, CDN) ──────────────────────
+let _Mp4Muxer = null;
+async function getMp4Muxer() {
+  if (_Mp4Muxer) return _Mp4Muxer;
+  await new Promise((res, rej) => {
+    if (typeof Mp4Muxer !== 'undefined') { res(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/mp4-muxer@5/build/mp4-muxer.js';
+    s.onload = res; s.onerror = rej;
+    document.head.appendChild(s);
+  });
+  _Mp4Muxer = Mp4Muxer;
+  return _Mp4Muxer;
+}
+
+async function generateMp4(src, inT, outT, key) {
+  const duration = Math.min(outT - inT, 120);
+  const FPS = 24; // lower fps = less frames to seek = more reliable
+
+  const prog = document.getElementById('gif-progress');
+  const bar  = document.getElementById('gif-prog-bar');
+  const lbl  = document.getElementById('gif-prog-label');
+  prog.classList.add('show');
+  bar.style.width = '0%';
+  lbl.textContent = '動画を読み込み中...';
+
+  // ── Check WebCodecs support ───────────────────────────
+  const hasWebCodecs = typeof VideoEncoder !== 'undefined' &&
+                       typeof AudioEncoder !== 'undefined';
+
+  if (!hasWebCodecs) {
+    // Fallback: MediaRecorder → WebM
+    await recordWebM(src, inT, outT, duration, FPS, prog, bar, lbl, key);
+    return;
+  }
+
+  // ── Load source video ─────────────────────────────────
+  const vid = document.createElement('video');
+  vid.muted = true; // muted for seek-based capture
+  vid.preload = 'auto';
+  if (!src.startsWith('blob:')) vid.crossOrigin = 'anonymous';
+  vid.src = src;
+  await new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error('読み込みタイムアウト')), 15000);
+    vid.addEventListener('loadedmetadata', () => { clearTimeout(t); res(); }, { once: true });
+    vid.addEventListener('error', () => { clearTimeout(t); rej(new Error('動画を読み込めません')); }, { once: true });
+    vid.load();
+  });
+
+  // ── Dimensions ───────────────────────────────────────
+  const vw = vid.videoWidth  || 640;
+  const vh = vid.videoHeight || 360;
+  const scale = Math.min(1, 1280 / vw);
+  const W = Math.round(vw * scale / 2) * 2;
+  const H = Math.round(vh * scale / 2) * 2;
+
+  // ── Video encoder config ──────────────────────────────
+  lbl.textContent = 'エンコーダーを初期化中...';
+  let vidCodec = 'avc1.4D001F'; // H.264 High Profile Level 3.1
+  let vidOk = false;
+  for (const codec of ['avc1.4D001F', 'avc1.42E01F', 'avc1.42001F']) {
+    try {
+      const r = await VideoEncoder.isConfigSupported({ codec, width: W, height: H, bitrate: 5_000_000, framerate: FPS });
+      if (r.supported) { vidCodec = codec; vidOk = true; break; }
+    } catch(e) {}
+  }
+  if (!vidOk) {
+    prog.classList.remove('show');
+    await recordWebM(src, inT, outT, duration, FPS, prog, bar, lbl, key);
+    return;
+  }
+
+  // ── Load mp4-muxer ────────────────────────────────────
+  lbl.textContent = 'mp4-muxerを読み込み中...';
+  const Mp4Muxer = await getMp4Muxer();
+
+  // ── Decode audio offline ──────────────────────────────
+  lbl.textContent = '音声をデコード中...';
+  bar.style.width = '5%';
+
+  let audioSamples = null; // Float32Array[] per channel
+  let sampleRate = 44100;
+  let nChannels = 2;
+  let audOk = false;
+
+  try {
+    const arrayBuf = await fetch(src).then(r => r.arrayBuffer());
+    const offlineCtx = new OfflineAudioContext(2, 44100 * (duration + 2), 44100);
+    const decoded = await offlineCtx.decodeAudioData(arrayBuf);
+    sampleRate = decoded.sampleRate;
+    nChannels  = Math.min(decoded.numberOfChannels, 2);
+
+    // Extract the clip range
+    const startSample = Math.round(inT  * sampleRate);
+    const endSample   = Math.round(outT * sampleRate);
+    const nSamples    = endSample - startSample;
+
+    audioSamples = [];
+    for (let c = 0; c < nChannels; c++) {
+      const full = decoded.getChannelData(c);
+      audioSamples.push(full.slice(startSample, endSample));
+    }
+
+    const audCodec = 'mp4a.40.2';
+    const audCheck = await AudioEncoder.isConfigSupported({ codec: audCodec, sampleRate, numberOfChannels: nChannels });
+    audOk = audCheck.supported;
+  } catch(e) {
+    console.warn('Audio decode failed, video-only:', e);
+  }
+
+  // ── Setup muxer ───────────────────────────────────────
+  const muxer = new Mp4Muxer.Muxer({
+    target: new Mp4Muxer.ArrayBufferTarget(),
+    video: { codec: 'avc', width: W, height: H },
+    ...(audOk ? { audio: { codec: 'aac', sampleRate, numberOfChannels: nChannels } } : {}),
+    fastStart: 'in-memory',
+  });
+
+  const videoEncoder = new VideoEncoder({
+    output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+    error:  e => { throw e; },
+  });
+  videoEncoder.configure({
+    codec: vidCodec, width: W, height: H,
+    bitrate: 5_000_000, framerate: FPS,
+    latencyMode: 'quality', avc: { format: 'avc' },
+  });
+
+  let audioEncoder = null;
+  if (audOk && audioSamples) {
+    audioEncoder = new AudioEncoder({
+      output: (chunk, meta) => muxer.addAudioChunk(chunk, meta),
+      error:  e => console.warn('AudioEncoder:', e),
+    });
+    audioEncoder.configure({
+      codec: 'mp4a.40.2', sampleRate, numberOfChannels: nChannels, bitrate: 128_000,
+    });
+  }
+
+  // ── Encode audio first (offline decoded) ─────────────
+  if (audioEncoder && audioSamples) {
+    lbl.textContent = '音声をエンコード中...';
+    const chunkSize = 4096;
+    const totalAudioSamples = audioSamples[0].length;
+    let audioUsec = 0;
+
+    for (let offset = 0; offset < totalAudioSamples; offset += chunkSize) {
+      const end = Math.min(offset + chunkSize, totalAudioSamples);
+      const nFrames = end - offset;
+
+      // Interleave channels into f32 planar format
+      const data = new Float32Array(nFrames * nChannels);
+      for (let c = 0; c < nChannels; c++) {
+        for (let i = 0; i < nFrames; i++) {
+          data[c * nFrames + i] = audioSamples[c][offset + i];
+        }
+      }
+
+      const ad = new AudioData({
+        format: 'f32-planar',
+        sampleRate,
+        numberOfFrames: nFrames,
+        numberOfChannels: nChannels,
+        timestamp: audioUsec,
+        data,
+      });
+      audioEncoder.encode(ad);
+      ad.close();
+      audioUsec += Math.round(nFrames / sampleRate * 1_000_000);
+    }
+    await audioEncoder.flush();
+  }
+
+  // ── Encode video frames by seeking ───────────────────
+  const totalFrames = Math.ceil(duration * FPS);
+  lbl.textContent = `映像をエンコード中... 0/${totalFrames}`;
+  bar.style.width = '20%';
+
+  for (let i = 0; i < totalFrames; i++) {
+    const seekTo = inT + i / FPS;
+
+    // Seek
+    vid.currentTime = seekTo;
+    await new Promise(res => {
+      const t = setTimeout(res, 3000);
+      vid.addEventListener('seeked', () => { clearTimeout(t); res(); }, { once: true });
+    });
+
+    // Create VideoFrame directly from the video element — avoids colorSpace:null
+    const ts = Math.round(i / FPS * 1_000_000); // microseconds
+    let frame;
+    try {
+      frame = new VideoFrame(vid, {
+        timestamp: ts,
+        duration:  Math.round(1_000_000 / FPS),
+      });
+    } catch(e) {
+      console.warn(`Frame ${i} failed, skipping:`, e.message);
+      continue;
+    }
+
+    videoEncoder.encode(frame, { keyFrame: i % (FPS * 2) === 0 });
+    frame.close();
+
+    const pct = 20 + (i + 1) / totalFrames * 75;
+    bar.style.width = pct + '%';
+    lbl.textContent = `映像をエンコード中... ${i + 1}/${totalFrames}`;
+
+    // Yield every 5 frames to keep UI alive
+    if (i % 5 === 0) await new Promise(r => setTimeout(r, 0));
+  }
+
+  vid.src = '';
+
+  lbl.textContent = 'エンコード完了待ち...';
+  bar.style.width = '97%';
+  await videoEncoder.flush();
+  muxer.finalize();
+
+  bar.style.width = '100%';
+  lbl.textContent = 'ダウンロード準備中...';
+  prog.classList.remove('show');
+
+  const { buffer } = muxer.target;
+  downloadBlob(new Blob([buffer], { type: 'video/mp4' }), `movref_${key}.mp4`);
+  notify('✓ MP4（映像＋音声）をダウンロードしました');
+}
+
+// ── MediaRecorder WebM fallback ────────────────────────
+async function recordWebM(src, inT, outT, duration, FPS, prog, bar, lbl, key) {
+  const vid2 = document.createElement('video');
+  vid2.muted = false; vid2.preload = 'auto';
+  if (!src.startsWith('blob:')) vid2.crossOrigin = 'anonymous';
+  vid2.src = src;
+  await new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error('読み込みタイムアウト')), 15000);
+    vid2.addEventListener('loadeddata', () => { clearTimeout(t); res(); }, { once: true });
+    vid2.addEventListener('error', () => { clearTimeout(t); rej(new Error('動画を読み込めません')); }, { once: true });
+    vid2.load();
+  });
+  vid2.currentTime = inT;
+  await new Promise(res => { const t = setTimeout(res, 3000); vid2.addEventListener('seeked', () => { clearTimeout(t); res(); }, { once: true }); });
+
+  const vw2 = vid2.videoWidth || 640, vh2 = vid2.videoHeight || 360;
+  const sc2 = Math.min(1, 1280 / vw2);
+  const W2 = Math.round(vw2 * sc2 / 2) * 2, H2 = Math.round(vh2 * sc2 / 2) * 2;
+  const cv2 = document.createElement('canvas'); cv2.width = W2; cv2.height = H2;
+  const cx2 = cv2.getContext('2d');
+
+  prog.classList.add('show'); bar.style.width = '0%'; lbl.textContent = '録画中（映像＋音声）... 0%';
+
+  const recMime = ['video/webm;codecs=vp9,opus','video/webm;codecs=vp8,opus','video/webm']
+    .find(m => MediaRecorder.isTypeSupported(m)) || 'video/webm';
+  const stream = cv2.captureStream(FPS);
+  const aCtx = new AudioContext();
+  const aSrc = aCtx.createMediaElementSource(vid2);
+  const aDst = aCtx.createMediaStreamDestination();
+  aSrc.connect(aDst); aSrc.connect(aCtx.destination);
+  const aTrack = aDst.stream.getAudioTracks()[0];
+  if (aTrack) stream.addTrack(aTrack);
+
+  const rec = new MediaRecorder(stream, { mimeType: recMime, videoBitsPerSecond: 8_000_000 });
+  const chunks = [];
+  rec.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
+  rec.start(100);
+  let rafId;
+  const draw = () => { cx2.drawImage(vid2, 0, 0, W2, H2); rafId = requestAnimationFrame(draw); };
+  draw(); vid2.play();
+
+  await new Promise(res => {
+    const iv = setInterval(() => {
+      const pct = Math.min((vid2.currentTime - inT) / duration * 100, 99);
+      bar.style.width = pct + '%'; lbl.textContent = `録画中... ${Math.round(pct)}%`;
+      if (vid2.currentTime >= outT - 0.05 || vid2.ended || vid2.paused) {
+        clearInterval(iv); vid2.pause(); cancelAnimationFrame(rafId); rec.stop(); res();
+      }
+    }, 100);
+    setTimeout(() => { clearInterval(iv); vid2.pause(); cancelAnimationFrame(rafId); if (rec.state !== 'inactive') rec.stop(); res(); }, (duration + 5) * 1000);
+  });
+  await new Promise(res => { if (rec.state === 'inactive') { res(); return; } rec.addEventListener('stop', res, { once: true }); });
+  aCtx.close(); vid2.src = '';
+  bar.style.width = '100%'; prog.classList.remove('show');
+  downloadBlob(new Blob(chunks, { type: recMime }), `movref_${key}.webm`);
+  notify('WebM（映像＋音声）でダウンロードしました');
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 8000);
+}
+
+// ── ONEDRIVE / MSAL ───────────────────────────────────
+// Azure App Registration が必要です（README.md 参照）
+// 取得した Client ID を localStorage に保存して使用します
+
+const OD_SCOPES = ['Files.ReadWrite.AppFolder','Files.Read','User.Read'];
+const OD_META_FILENAME = 'movref_data.json';
+
+let msalInstance = null;
+let odAccount    = null;
+let odToken      = null;
+
+function getClientId(){
+  return localStorage.getItem('movref_od_client_id') || '';
+}
+
+async function initMsal(){
+  const clientId = getClientId();
+  if(!clientId){ return; } // Client ID未設定なら何もしない
+  if(msalInstance) return; // 既に初期化済み
+  try{
+    msalInstance = new msal.PublicClientApplication({
+      auth:{
+        clientId,
+        authority:'https://login.microsoftonline.com/common',
+        redirectUri: location.origin + location.pathname,
+      },
+      cache:{ cacheLocation:'localStorage', storeAuthStateInCookie:false }
+    });
+    // リダイレクト後の処理
+    const resp = await msalInstance.handleRedirectPromise();
+    if(resp && resp.account){
+      odAccount = resp.account;
+      odToken   = resp.accessToken;
+      onOdSignedIn();
+      return;
+    }
+    // キャッシュからアカウント復元
+    const accounts = msalInstance.getAllAccounts();
+    if(accounts.length > 0){
+      odAccount = accounts[0];
+      const t = await acquireToken();
+      if(t) onOdSignedIn();
+    }
+  }catch(e){ console.warn('MSAL init error:', e); }
+}
+
+async function acquireToken(){
+  if(!msalInstance || !odAccount) return null;
+  try{
+    const r = await msalInstance.acquireTokenSilent({ scopes: OD_SCOPES, account: odAccount });
+    odToken = r.accessToken;
+    return odToken;
+  }catch(e){
+    try{
+      const r = await msalInstance.acquireTokenPopup({ scopes: OD_SCOPES });
+      odToken = r.accessToken; odAccount = r.account;
+      return odToken;
+    }catch(e2){ notify('トークン取得失敗: ' + e2.message, 'error'); return null; }
+  }
+}
+
+async function odSignIn(){
+  let clientId = getClientId();
+  if(!clientId){
+    clientId = (prompt(
+      'Azure Client ID を入力してください\n\n' +
+      '取得方法: README.md を参照\n' +
+      '（一度入力すると保存されます）'
+    ) || '').trim();
+    if(!clientId){ notify('Client IDが必要です', 'error'); return; }
+    localStorage.setItem('movref_od_client_id', clientId);
+    msalInstance = null; // 再初期化
+  }
+  // MSAL初期化（未初期化の場合）
+  if(!msalInstance){
+    try{
+      msalInstance = new msal.PublicClientApplication({
+        auth:{
+          clientId,
+          authority:'https://login.microsoftonline.com/common',
+          redirectUri: location.origin + location.pathname,
+        },
+        cache:{ cacheLocation:'localStorage', storeAuthStateInCookie:false }
+      });
+      await msalInstance.handleRedirectPromise().catch(()=>{});
+    }catch(e){ notify('MSAL初期化エラー: ' + e.message, 'error'); return; }
+  }
+  try{
+    const r = await msalInstance.loginPopup({ scopes: OD_SCOPES });
+    odAccount = r.account; odToken = r.accessToken;
+    onOdSignedIn();
+  }catch(e){
+    if(e.errorCode !== 'user_cancelled')
+      notify('サインイン失敗: ' + (e.message || e.errorCode), 'error');
+  }
+}
+
+function onOdSignedIn(){
+  const name = odAccount?.name || odAccount?.username || 'ユーザー';
+  // トップバー更新
+  const btn = document.getElementById('od-btn');
+  if(btn){ btn.classList.add('connected'); btn.innerHTML = `<span class="dot" id="od-dot" style="background:var(--accent);box-shadow:0 0 5px var(--accent)"></span>${name}`; }
+  const fb = document.getElementById('od-folder-btn');  if(fb) fb.style.display = 'flex';
+  const sb = document.getElementById('od-signout-btn'); if(sb) sb.style.display = 'flex';
+  loadMetaFromOd();
+  notify('✓ OneDriveに接続しました: ' + name);
+}
+
+function odSignOut(){
+  if(msalInstance && odAccount) msalInstance.logoutPopup({ account: odAccount }).catch(()=>{});
+  odAccount = null; odToken = null;
+  const btn = document.getElementById('od-btn');
+  if(btn){ btn.classList.remove('connected'); btn.innerHTML = '<span class="dot" id="od-dot"></span>OneDrive'; }
+  document.getElementById('od-folder-btn').style.display  = 'none';
+  document.getElementById('od-signout-btn').style.display = 'none';
+  notify('OneDriveからサインアウトしました');
+}
+
+async function odFetch(url, opts = {}){
+  if(!odToken){ odToken = await acquireToken(); }
+  if(!odToken) return null;
+  const r = await fetch(url, {
+    ...opts,
+    headers:{ Authorization: 'Bearer ' + odToken, 'Content-Type':'application/json', ...(opts.headers||{}) }
+  });
+  if(r.status === 401){
+    odToken = null;
+    notify('セッション期限切れ。再サインインしてください', 'error');
+    return null;
+  }
+  return r;
+}
+
+// ── META SYNC (OneDrive appDataFolder) ───────────────
+// appDataFolder = ユーザーには見えない隠し領域 (Files.ReadWrite.AppFolder スコープ)
+async function loadMetaFromOd(){
+  try{
+    notify('OneDriveからデータを読み込み中...');
+    // appDataFolder 内のファイル一覧
+    const r = await odFetch(
+      `https://graph.microsoft.com/v1.0/me/drive/special/approot/children` +
+      `?$filter=name eq '${OD_META_FILENAME}'&$select=id,name`
+    );
+    if(!r||!r.ok) return;
+    const data = await r.json();
+    const items = data.value || [];
+    if(!items.length) return; // 初回は空
+
+    const fileId = items[0].id;
+    const content = await odFetch(
+      `https://graph.microsoft.com/v1.0/me/drive/items/${fileId}/content`,
+      { headers:{ Authorization:'Bearer '+odToken } } // Content-Type不要
+    );
+    if(!content||!content.ok) return;
+    const saved = await content.json();
+    if(saved && typeof saved === 'object'){
+      Object.assign(meta, saved.meta || {});
+      if(saved.tagOrder) tagOrder = saved.tagOrder;
+      if(saved.videos){
+        saved.videos.forEach(v => {
+          if(!videos.find(x => x.id === v.id)) videos.push({...v, url:null});
+        });
+      }
+      store.save(); renderAll();
+      notify('✓ OneDriveからデータを読み込みました');
+    }
+  }catch(e){ console.warn('OD load error:', e); }
+}
+
+async function saveMetaToOd(){
+  if(!odToken) return;
+  const payload = JSON.stringify({
+    meta, tagOrder,
+    videos: videos.map(v => ({ id:v.id, name:v.name, source:v.source, modified:v.modified, duration:v.duration }))
+  });
+  try{
+    // PUT to approot/<filename> — creates or overwrites
+    await fetch(
+      `https://graph.microsoft.com/v1.0/me/drive/special/approot:/${OD_META_FILENAME}:/content`,
+      { method:'PUT', headers:{ Authorization:'Bearer '+odToken, 'Content-Type':'application/json' }, body:payload }
+    );
+  }catch(e){ console.warn('OD save error:', e); }
+}
+
+// store.save をフック: localStorage + OneDrive に同時保存
+const _origSave = store.save.bind(store);
+store.save = function(){ _origSave(); if(odToken) saveMetaToOd(); };
+
+// ── FOLDER PICKER (OneDrive) ──────────────────────────
+// OneDrive のフォルダを一覧 → prompt で選択 → 動画を読み込む
+async function odPickFolder(){
+  if(!odToken && !(await acquireToken())){ notify('サインインしてください', 'error'); return; }
+  try{
+    notify('フォルダ一覧を取得中...');
+    const r = await odFetch(
+      `https://graph.microsoft.com/v1.0/me/drive/root/children` +
+      `?$filter=folder ne null&$select=id,name&$top=100`
+    );
+    if(!r||!r.ok){ notify('フォルダ一覧の取得に失敗しました', 'error'); return; }
+    const data = await r.json();
+    const folders = data.value || [];
+    if(!folders.length){ notify('OneDriveのルートにフォルダが見つかりません', 'error'); return; }
+
+    const chosen = prompt(
+      '読み込む動画フォルダを選んでください:\n\n' +
+      folders.map((f,i) => `${i+1}. ${f.name}`).join('\n') +
+      '\n\n番号または名前を入力'
+    );
+    if(!chosen) return;
+
+    const idx = parseInt(chosen) - 1;
+    const folder = (!isNaN(idx) && folders[idx])
+      ? folders[idx]
+      : folders.find(f => f.name === chosen.trim());
+
+    if(!folder){ notify('フォルダが見つかりません', 'error'); return; }
+    await loadOdFolder(folder.id, folder.name);
+  }catch(e){ notify('フォルダ選択エラー: ' + e.message, 'error'); }
+}
+
+async function loadOdFolder(folderId, folderName){
+  notify(`「${folderName}」の動画を読み込み中...`);
+  try{
+    const r = await odFetch(
+      `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children` +
+      `?$select=id,name,createdDateTime,file,@microsoft.graph.downloadUrl&$top=200`
+    );
+    if(!r||!r.ok){ notify('動画の取得に失敗しました', 'error'); return; }
+    const data = await r.json();
+    const videoExts = /\.(mp4|mov|m4v|avi|mkv|webm|wmv|flv|mts|m2ts)$/i;
+    const items = (data.value || []).filter(f => f.file && videoExts.test(f.name));
+    if(!items.length){ notify('フォルダに動画が見つかりません', 'error'); return; }
+
+    let added = 0;
+    items.forEach(item => {
+      const id = 'od_' + item.id;
+      if(videos.find(v => v.id === id)) return;
+      const d = new Date(item.createdDateTime || Date.now());
+      const period = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+      // @microsoft.graph.downloadUrl は一時的なDL URL (認証不要・有効期限あり)
+      const url = item['@microsoft.graph.downloadUrl'] || null;
+      videos.push({ id, name:item.name, source:'OneDrive: '+folderName,
+        modified:item.createdDateTime?.slice(0,10)||'', url, duration:null });
+      const m = M(id); if(!m.period) m.period = period;
+      added++;
+    });
+    store.save(); renderAll();
+    notify(`✓ ${added}本の動画を読み込みました（全${items.length}本）`);
+  }catch(e){ notify('動画読み込みエラー: ' + e.message, 'error'); }
+}
+
+// ── MODAL ─────────────────────────────────────────────
+function openModal(id,tab){
+  curVid=id;inPt=null;outPt=null;
+  const v=videos.find(v=>v.id===id);
+  document.getElementById('modal-title').textContent=v.name;
+  const ve=document.getElementById('modal-video');
+  if(v.url){ve.src=v.url;ve.style.display='block'}
+  else{ve.src='';ve.style.display='none';pickFile(id)}
+  setSpeed(1);// reset speed
+  updateMarkers();renderModalMeta();renderClips();switchMTab(tab||'info');
+  document.getElementById('modal-overlay').classList.add('open');
+  ve.addEventListener('timeupdate',onTU);ve.addEventListener('loadedmetadata',onLM);
+}
+function pickFile(id){
+  const inp=document.createElement('input');inp.type='file';inp.accept='video/*';
+  inp.onchange=()=>{
+    if(inp.files[0])loadLocalFile(id,inp.files[0]);
+    const v=videos.find(v=>v.id===id),ve=document.getElementById('modal-video');
+    if(v&&v.url){ve.src=v.url;ve.style.display='block'}
+  };inp.click();
+}
+function closeModal(){
+  document.getElementById('modal-overlay').classList.remove('open');
+  const v=document.getElementById('modal-video');v.pause();v.src='';curVid=null;
+}
+function handleOverlayClick(e){if(e.target===document.getElementById('modal-overlay'))closeModal()}
+
+// ── PLAYER ────────────────────────────────────────────
+function onLM(){
+  const v=document.getElementById('modal-video');
+  document.getElementById('t-tot').textContent=fmt(v.duration);
+  const vid=videos.find(v=>v.id===curVid);if(vid)vid.duration=v.duration;
+  // auto-fill period from video if empty
+  if(vid){
+    const m=M(curVid);
+    if(!m.period&&vid.modified){
+      const d=new Date(vid.modified);
+      m.period=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+    }
+  }
+}
+function onTU(){
+  const v=document.getElementById('modal-video');if(!v.duration)return;
+  document.getElementById('tl-prog').style.width=(v.currentTime/v.duration*100)+'%';
+  document.getElementById('t-cur').textContent=fmt(v.currentTime);
+}
+function togglePlay(){
+  const v=document.getElementById('modal-video');
+  if(v.paused){v.play();document.getElementById('play-btn').textContent='⏸'}
+  else{v.pause();document.getElementById('play-btn').textContent='▶'}
+}
+function skip(s){const v=document.getElementById('modal-video');v.currentTime=Math.max(0,Math.min(v.duration||0,v.currentTime+s))}
+function seekTL(e){
+  const v=document.getElementById('modal-video');if(!v.duration)return;
+  const r=document.getElementById('tl-wrap').getBoundingClientRect();
+  v.currentTime=((e.clientX-r.left)/r.width)*v.duration;
+}
+function setSpeed(rate){
+  const v=document.getElementById('modal-video');if(v)v.playbackRate=rate;
+  ['05','10','20'].forEach(id=>{
+    const b=document.getElementById('spd-'+id);
+    if(b)b.classList.toggle('active',parseFloat(id)/10===rate||(id==='10'&&rate===1));
+  });
+}
+function markIn(){inPt=document.getElementById('modal-video').currentTime;updateMarkers();notify('[ IN: '+fmt(inPt))}
+function markOut(){outPt=document.getElementById('modal-video').currentTime;updateMarkers();notify('OUT ]: '+fmt(outPt))}
+function updateMarkers(){
+  const v=document.getElementById('modal-video'),dur=v.duration||1;
+  const mi=document.getElementById('m-in'),mo=document.getElementById('m-out');
+  const range=document.getElementById('tl-range'),rd=document.getElementById('t-range');
+  const gb=document.getElementById('btn-gif');
+  if(inPt!==null){mi.style.display='block';mi.style.left=(inPt/dur*100)+'%'}
+  if(outPt!==null){mo.style.display='block';mo.style.left=(outPt/dur*100)+'%'}
+  if(inPt!==null&&outPt!==null&&outPt>inPt){
+    range.style.left=(inPt/dur*100)+'%';range.style.width=((outPt-inPt)/dur*100)+'%';
+    rd.style.display='inline';rd.textContent=fmt(inPt)+' → '+fmt(outPt);gb.disabled=false;
+  }else{range.style.width='0';rd.style.display='none';gb.disabled=true}
+}
+
+// ── REF CLIP ──────────────────────────────────────────
+function addRef(){
+  if(inPt===null||outPt===null||outPt<=inPt)return;
+  M(curVid).clips.push({in:inPt,out:outPt,note:''});store.save();
+  inPt=null;outPt=null;
+  ['m-in','m-out'].forEach(id=>document.getElementById(id).style.display='none');
+  document.getElementById('tl-range').style.width='0';
+  document.getElementById('t-range').style.display='none';
+  document.getElementById('btn-gif').disabled=true;
+  renderClips();switchMTab('clips');renderGallery();notify('🎞️ Refクリップを登録しました');
+}
+function renderClips(){
+  const m=M(curVid),list=document.getElementById('clips-list'),nc=document.getElementById('no-clips');
+  if(!m.clips.length){list.innerHTML='';nc.style.display='block';return}
+  nc.style.display='none';
+  list.innerHTML=m.clips.map((c,i)=>`
+    <div class="clip-item">
+      <span style="font-size:.9rem">🎞️</span>
+      <div style="flex:1;min-width:0">
+        <div class="clip-range">${fmt(c.in)} → ${fmt(c.out)}</div>
+        <input type="text" value="${c.note||''}" placeholder="メモ..."
+          style="background:none;border:none;color:var(--text2);font-size:.67rem;font-family:'Noto Sans JP',sans-serif;width:100%;outline:none;margin-top:2px"
+          onchange="updClipNote(${i},this.value)">
+      </div>
+      <button class="clip-del" onclick="delClip(${i})">✕</button>
+    </div>`).join('');
+}
+function updClipNote(i,n){M(curVid).clips[i].note=n;store.save()}
+function delClip(i){M(curVid).clips.splice(i,1);store.save();renderClips();renderGallery();notify('クリップを削除しました')}
+
+// ── META (modal) ──────────────────────────────────────
+function renderModalMeta(){
+  const m=M(curVid);
+  document.getElementById('modal-heart').textContent=m.fav?'❤️':'🤍';
+  document.getElementById('fav-lbl').textContent=m.fav?'お気に入り登録済み':'お気に入りに追加';
+  document.getElementById('v-memo').value=m.memo||'';
+  document.getElementById('v-client').value=m.client||'';
+  document.getElementById('v-period').value=m.period||'';
+  renderTagPills();
+}
+function renderTagPills(){
+  const m=M(curVid),w=document.getElementById('tag-wrap'),inp=document.getElementById('tag-inp');
+  w.querySelectorAll('.tag-pill').forEach(e=>e.remove());
+  m.tags.forEach((t,i)=>{
+    const el=document.createElement('span');el.className='tag-pill';
+    el.innerHTML=`${t} <span class="tag-rm" onclick="rmTag(${i})">✕</span>`;
+    w.insertBefore(el,inp);
+  });
+}
+function focusTagInp(){document.getElementById('tag-inp').focus()}
+function handleTag(e){
+  if(e.key==='Enter'||e.key===','){
+    e.preventDefault();const v=e.target.value.trim().replace(/,$/,'');if(!v)return;
+    const m=M(curVid);if(!m.tags.includes(v))m.tags.push(v);
+    e.target.value='';renderTagPills();store.save();renderSBTags();
+  }else if(e.key==='Backspace'&&!e.target.value){M(curVid).tags.pop();renderTagPills();store.save()}
+}
+function rmTag(i){M(curVid).tags.splice(i,1);renderTagPills();store.save()}
+function toggleFav(){
+  const m=M(curVid);m.fav=!m.fav;store.save();renderModalMeta();
+  notify(m.fav?'❤️ お気に入りに追加':'🤍 お気に入りを解除');
+}
+function saveMeta(){
+  const m=M(curVid);
+  m.memo=document.getElementById('v-memo').value;
+  m.client=document.getElementById('v-client').value;
+  m.period=document.getElementById('v-period').value;
+  store.save();renderSBTags();renderGallery();notify('✓ 保存しました');
+}
+function switchMTab(n){
+  document.querySelectorAll('.msb-tab').forEach((b,i)=>b.classList.toggle('active',['info','clips'][i]===n));
+  document.getElementById('tab-info').classList.toggle('active',n==='info');
+  document.getElementById('tab-clips').classList.toggle('active',n==='clips');
+}
+
+// ── UTIL ──────────────────────────────────────────────
+function fmt(s){
+  if(s==null||isNaN(s))return '--:--';
+  s=Math.max(0,s);return Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0');
+}
+
+// ── INIT ──────────────────────────────────────────────
+store.load();
+applyDesktopSB();
+updateFilterUI();
+initMsal(); // MSAL: キャッシュからアカウント自動復元を試みる
+switchView('mov');
+</script>
+</body>
+</html>
