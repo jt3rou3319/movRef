@@ -51,7 +51,7 @@ git push -u origin main
 |------|-----|
 | 名前 | `movRef` （任意） |
 | サポートされているアカウントの種類 | **個人の Microsoft アカウントのみ** |
-| リダイレクト URI（プラットフォーム） | **シングルページアプリケーション (SPA)** |
+| リダイレクト URI（プラットフォーム） | **Web** ← 必ずWebを選択（SPAではない） |
 | リダイレクト URI（URL） | `https://<username>.github.io/movref/` |
 
 4. **「登録」** をクリック
