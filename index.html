@@ -1332,18 +1332,34 @@ const OD_META_FILENAME = 'movref_data.json';
 let msalInstance = null;
 let odAccount    = null;
 let odToken      = null;
+let _msalLoaded  = false;
 
-// MSALを動的ロード（CDNが使える環境でのみ動作）
+// MSALを動的ロード。onload後にグローバルが確定するまでポーリング
 function loadMsalScript(){
   return new Promise((res, rej) => {
-    if(typeof msal !== 'undefined'){ res(); return; }
+    if(_msalLoaded && typeof window.msal !== 'undefined'){ res(); return; }
+    if(typeof window.msal !== 'undefined'){ _msalLoaded=true; res(); return; }
+
     const s = document.createElement('script');
     s.src = 'https://alcdn.msauth.net/browser/2.38.3/js/msal-browser.min.js';
-    s.onload  = () => res();
+    s.onload = () => {
+      // onload直後はまだ未定義のことがあるのでポーリング
+      let tries = 0;
+      const check = setInterval(() => {
+        if(typeof window.msal !== 'undefined'){
+          clearInterval(check);
+          _msalLoaded = true;
+          res();
+        } else if(++tries > 50){ // 5秒タイムアウト
+          clearInterval(check);
+          rej(new Error('MSALライブラリのロード後もmsalが未定義です。GitHub Pages (HTTPS) でお試しください。'));
+        }
+      }, 100);
+    };
     s.onerror = () => rej(new Error(
       'MSALライブラリの読み込みに失敗しました。\n' +
-      'このアプリはGitHub Pages（https://）上で使用してください。\n' +
-      'ローカルファイル（file://）では動作しません。'
+      'GitHub Pages（https://username.github.io/movref/）上で使用してください。\n' +
+      'claude.ai上やfile://では動作しません。'
     ));
     document.head.appendChild(s);
   });
@@ -1364,15 +1380,22 @@ function getClientId(){
   return localStorage.getItem('movref_od_client_id') || '';
 }
 
+function makeMsalInstance(clientId){
+  // window.msal を明示的に使う
+  const Ctor = window.msal?.PublicClientApplication;
+  if(!Ctor) throw new Error('msal is not defined（ライブラリのロードに失敗）');
+  return new Ctor(buildMsalConfig(clientId));
+}
+
 // 起動時: 保存済みClient IDがあればサイレントサインインを試みる
 async function initMsal(){
   const clientId = getClientId();
   if(!clientId) return;
   try{
     await loadMsalScript();
-    msalInstance = new msal.PublicClientApplication(buildMsalConfig(clientId));
+    msalInstance = makeMsalInstance(clientId);
     const resp = await msalInstance.handleRedirectPromise();
-    if(resp && resp.account){
+    if(resp?.account){
       odAccount = resp.account; odToken = resp.accessToken;
       onOdSignedIn(); return;
     }
@@ -1382,7 +1405,7 @@ async function initMsal(){
       const t = await acquireToken();
       if(t) onOdSignedIn();
     }
-  }catch(e){ console.warn('MSAL init:', e.message); }
+  }catch(e){ console.warn('MSAL init (silent):', e.message); }
 }
 
 async function acquireToken(){
@@ -1401,17 +1424,13 @@ async function acquireToken(){
 }
 
 async function odSignIn(){
-  // Client IDの取得・保存
   let clientId = getClientId();
   if(!clientId){
-    clientId = (prompt(
-      'Azure Client ID を入力してください\n（README.md の Step 3 を参照）'
-    ) || '').trim();
+    clientId = (prompt('Azure Client ID を入力してください\n（README.md の Step 3 を参照）') || '').trim();
     if(!clientId){ notify('Client IDが必要です', 'error'); return; }
     localStorage.setItem('movref_od_client_id', clientId);
   }
 
-  // MSALを動的ロード
   notify('OneDriveライブラリを読み込み中...');
   try{
     await loadMsalScript();
@@ -1419,17 +1438,16 @@ async function odSignIn(){
     notify(e.message, 'error'); return;
   }
 
-  // MSAL初期化（Client ID変更時は再初期化）
   try{
-    if(!msalInstance || msalInstance.config?.auth?.clientId !== clientId){
-      msalInstance = new msal.PublicClientApplication(buildMsalConfig(clientId));
+    const existing = msalInstance?.config?.auth?.clientId;
+    if(!msalInstance || existing !== clientId){
+      msalInstance = makeMsalInstance(clientId);
       await msalInstance.handleRedirectPromise().catch(()=>{});
     }
   }catch(e){
     notify('MSAL初期化エラー: ' + e.message, 'error'); return;
   }
 
-  // ログイン
   try{
     const r = await msalInstance.loginPopup({ scopes: OD_SCOPES });
     odAccount = r.account; odToken = r.accessToken;
