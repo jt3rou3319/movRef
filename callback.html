@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>movRef - 認証中...</title>
+<style>
+  body{font-family:sans-serif;background:#09090e;color:#eeeef5;
+    display:flex;align-items:center;justify-content:center;
+    height:100vh;margin:0;text-align:center;}
+  p{opacity:.6;font-size:.9rem;}
+</style>
+</head>
+<body>
+<div>
+  <p>認証中です。このウィンドウは自動的に閉じます...</p>
+</div>
+<script>
+  // URLのクエリパラメータからcodeとstateを取得
+  const p = new URLSearchParams(location.search);
+  const code  = p.get('code');
+  const state = p.get('state');
+  const error = p.get('error');
+  const error_description = p.get('error_description');
+
+  // 親ウィンドウにpostMessageで送信
+  if(window.opener && !window.opener.closed){
+    window.opener.postMessage({
+      type:  'od_callback',
+      code,
+      state,
+      error,
+      error_description,
+    }, location.origin);
+  }
+
+  // 少し待ってから閉じる
+  setTimeout(() => window.close(), 500);
+</script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>movRef v6</title>
+<title>movRef v7</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
@@ -1325,12 +1325,11 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 8000);
 }
 
-// ── ONEDRIVE AUTH (OAuth2 PKCE ポップアップ方式) ──────
-// MSALライブラリ不要。window.openでMicrosoft認証を開き
-// postMessageでトークンを受け取る方式。
-// GitHub PagesのSPA登録で動作。
+// ── ONEDRIVE AUTH (OAuth2 PKCE + ポップアップ方式) ────
+// callback.htmlをポップアップで開き、postMessageでcodeを受け取る。
+// index.htmlは一切リダイレクトされない。
 
-const OD_SCOPES       = 'Files.ReadWrite.AppFolder Files.Read User.Read offline_access';
+const OD_SCOPES        = 'Files.ReadWrite.AppFolder Files.Read User.Read offline_access';
 const OD_META_FILENAME = 'movref_data.json';
 const OD_AUTH_URL      = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
 const OD_TOKEN_URL     = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
@@ -1340,93 +1339,88 @@ let odRefresh = null;
 let odAccount = null;
 
 function getClientId(){ return localStorage.getItem('movref_od_client_id') || ''; }
-function getRedirectUri(){ return location.origin + location.pathname; }
+// callbackはcallback.htmlを使う
+function getCallbackUri(){
+  // 現在のパスのファイル名部分をcallback.htmlに置換
+  const base = location.href.split('?')[0].split('#')[0];
+  const dir  = base.endsWith('/') ? base : base.substring(0, base.lastIndexOf('/')+1);
+  return dir + 'callback.html';
+}
 
-// ── PKCE helpers ──────────────────────────────────────
+// ── PKCE ──────────────────────────────────────────────
 async function pkceChallenge(){
   const arr = crypto.getRandomValues(new Uint8Array(32));
-  const verifier = btoa(String.fromCharCode(...arr))
-    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+  const verifier = btoa(String.fromCharCode(...arr)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
   const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
-  const challenge = btoa(String.fromCharCode(...new Uint8Array(buf)))
-    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+  const challenge = btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
   return { verifier, challenge };
 }
 
-// ── SIGN IN ───────────────────────────────────────────
+// ── SIGN IN (ポップアップ) ────────────────────────────
 async function odSignIn(){
   let clientId = getClientId();
   if(!clientId){
     clientId = (prompt('Azure Client ID を入力してください\n（README.md の Step 3 を参照）') || '').trim();
-    if(!clientId){ notify('Client IDが必要です', 'error'); return; }
+    if(!clientId){ notify('Client IDが必要です','error'); return; }
     localStorage.setItem('movref_od_client_id', clientId);
   }
 
   const { verifier, challenge } = await pkceChallenge();
   const state = crypto.randomUUID();
+  const callbackUri = getCallbackUri();
 
-  // PKCEデータをlocalStorageに保存
-  localStorage.setItem('od_pkce_verifier', verifier);
-  localStorage.setItem('od_state', state);
-
-  const params = new URLSearchParams({
+  const authUrl = OD_AUTH_URL + '?' + new URLSearchParams({
     client_id:             clientId,
     response_type:         'code',
-    redirect_uri:          getRedirectUri(),
+    redirect_uri:          callbackUri,
     scope:                 OD_SCOPES,
     state,
     code_challenge:        challenge,
     code_challenge_method: 'S256',
-    response_mode:         'fragment', // fragmentならURLのhashに入るのでサーバーに送られない
+    response_mode:         'query',
   });
 
-  // 同じタブでリダイレクト（ポップアップブロック回避）
-  location.href = OD_AUTH_URL + '?' + params.toString();
-}
+  // ポップアップを開く
+  const popup = window.open(authUrl, 'od_auth',
+    'width=520,height=640,left='+ Math.round((screen.width-520)/2) +',top='+ Math.round((screen.height-640)/2));
 
-// ── リダイレクト後の処理（fragment mode）─────────────
-// response_mode=fragment の場合、認可コードはURLのhash(#)に入る
-async function handleOdRedirect(){
-  // fragmentモード: #code=...&state=...
-  const hash   = location.hash.slice(1); // '#' を除去
-  const search = location.search;        // ?code=... の場合も対応
-
-  const fromHash   = new URLSearchParams(hash);
-  const fromSearch = new URLSearchParams(search);
-
-  // どちらかにcodeがあれば処理
-  const code  = fromHash.get('code')  || fromSearch.get('code');
-  const state = fromHash.get('state') || fromSearch.get('state');
-  const error = fromHash.get('error') || fromSearch.get('error');
-
-  if(error){
-    const desc = fromHash.get('error_description') || fromSearch.get('error_description') || error;
-    notify('サインインエラー: ' + decodeURIComponent(desc.replace(/\+/g,' ')), 'error');
-    history.replaceState({}, '', location.pathname);
-    return;
-  }
-  if(!code) return; // 認可コードなし → 通常起動
-
-  const savedState    = localStorage.getItem('od_state');
-  const savedVerifier = localStorage.getItem('od_pkce_verifier');
-  localStorage.removeItem('od_state');
-  localStorage.removeItem('od_pkce_verifier');
-
-  // URLをすぐクリーンアップ
-  history.replaceState({}, '', location.pathname);
-
-  if(!savedVerifier){
-    notify('PKCEデータが見つかりません。再度サインインしてください', 'error');
-    return;
-  }
-  if(savedState && state !== savedState){
-    notify('セキュリティチェック失敗。再度サインインしてください', 'error');
+  if(!popup || popup.closed){
+    notify('ポップアップがブロックされました。ブラウザのポップアップ許可を確認してください','error');
     return;
   }
 
+  notify('Microsoftのサインイン画面が開きます...');
+
+  // callback.htmlからpostMessageでcodeを受け取る
+  const code = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      window.removeEventListener('message', handler);
+      if(!popup.closed) popup.close();
+      reject(new Error('サインインがタイムアウトしました（5分）'));
+    }, 5 * 60 * 1000);
+
+    function handler(event){
+      // 同一オリジンからのメッセージのみ受け付ける
+      if(event.origin !== location.origin) return;
+      if(event.data?.type !== 'od_callback') return;
+      clearTimeout(timer);
+      window.removeEventListener('message', handler);
+      if(!popup.closed) popup.close();
+      if(event.data.error){
+        reject(new Error(event.data.error_description || event.data.error));
+      } else if(event.data.state !== state){
+        reject(new Error('state不一致。再度お試しください'));
+      } else {
+        resolve(event.data.code);
+      }
+    }
+    window.addEventListener('message', handler);
+  }).catch(e => { notify(e.message,'error'); return null; });
+
+  if(!code) return;
+
+  // トークン取得
   notify('OneDriveに接続中...');
-  const clientId = getClientId();
-
   try{
     const resp = await fetch(OD_TOKEN_URL, {
       method: 'POST',
@@ -1435,128 +1429,87 @@ async function handleOdRedirect(){
         client_id:     clientId,
         grant_type:    'authorization_code',
         code,
-        redirect_uri:  getRedirectUri(),
-        code_verifier: savedVerifier,
+        redirect_uri:  callbackUri,
+        code_verifier: verifier,
       }).toString(),
     });
-
-    let data;
-    try{ data = await resp.json(); } catch(e){ data = {}; }
-
-    if(!resp.ok){
-      const msg = data.error_description || data.error || ('HTTP ' + resp.status);
-      // CORSかどうか判定
-      throw new Error(msg);
-    }
-
+    let data; try{ data = await resp.json(); }catch(e){ data={}; }
+    if(!resp.ok) throw new Error(data.error_description || data.error || 'HTTP '+resp.status);
     storeTokens(data);
     await loadUserInfo();
     onOdSignedIn();
-
   }catch(e){
-    const isCors = e.message === 'Failed to fetch' || e.name === 'TypeError';
-    if(isCors){
-      notify('CORSエラー: Azure PortalでプラットフォームをSPAに設定してください', 'error');
-    } else {
-      notify('トークン取得エラー: ' + e.message, 'error');
-    }
+    const isCors = e.message==='Failed to fetch' || e.name==='TypeError';
+    notify(isCors ? 'CORSエラー: AzureポータルでプラットフォームをSPAに設定してください' : 'エラー: '+e.message, 'error');
   }
 }
+
+// ── handleOdRedirect は不要（callback.htmlが担う）───
+function handleOdRedirect(){ /* no-op */ }
 
 function storeTokens(tokens){
   odToken   = tokens.access_token;
   odRefresh = tokens.refresh_token || odRefresh;
-  const exp = Date.now() + (tokens.expires_in || 3600) * 1000;
-  localStorage.setItem('movref_od_tokens', JSON.stringify({
-    access_token:  odToken,
-    refresh_token: odRefresh,
-    expires_at:    exp,
-  }));
+  const exp = Date.now() + (tokens.expires_in||3600)*1000;
+  localStorage.setItem('movref_od_tokens', JSON.stringify({access_token:odToken,refresh_token:odRefresh,expires_at:exp}));
 }
 
 async function refreshToken(){
   const clientId = getClientId();
-  if(!clientId || !odRefresh) return false;
+  if(!clientId||!odRefresh) return false;
   try{
-    const resp = await fetch(OD_TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        client_id:     clientId,
-        grant_type:    'refresh_token',
-        refresh_token: odRefresh,
-        scope:         OD_SCOPES,
-      }).toString(),
+    const resp = await fetch(OD_TOKEN_URL,{
+      method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body: new URLSearchParams({client_id:clientId,grant_type:'refresh_token',refresh_token:odRefresh,scope:OD_SCOPES}).toString(),
     });
     if(!resp.ok) return false;
-    const tokens = await resp.json();
-    storeTokens(tokens);
-    return true;
+    storeTokens(await resp.json()); return true;
   }catch(e){ return false; }
 }
 
-// ── 起動時: 保存済みトークンを復元 ───────────────────
 async function initMsal(){
   const saved = localStorage.getItem('movref_od_tokens');
   if(!saved) return;
   try{
     const t = JSON.parse(saved);
-    odToken   = t.access_token;
-    odRefresh = t.refresh_token;
-    if(t.expires_at < Date.now() + 60000){
-      const ok = await refreshToken();
-      if(!ok){ odToken = null; return; }
-    }
-    await loadUserInfo();
-    onOdSignedIn();
+    odToken=t.access_token; odRefresh=t.refresh_token;
+    if(t.expires_at < Date.now()+60000){ const ok=await refreshToken(); if(!ok){odToken=null;return;} }
+    await loadUserInfo(); onOdSignedIn();
   }catch(e){ localStorage.removeItem('movref_od_tokens'); }
 }
 
 async function loadUserInfo(){
   try{
     const r = await odFetch('https://graph.microsoft.com/v1.0/me?$select=displayName,userPrincipalName');
-    if(r && r.ok){
-      const d = await r.json();
-      odAccount = { name: d.displayName || d.userPrincipalName };
-    }
+    if(r&&r.ok){ const d=await r.json(); odAccount={name:d.displayName||d.userPrincipalName}; }
   }catch(e){}
 }
 
-async function odFetch(url, opts = {}){
-  if(!odToken){ notify('OneDriveにサインインしてください', 'error'); return null; }
-  const doFetch = () => fetch(url, {
-    ...opts,
-    headers:{ Authorization:'Bearer '+odToken, 'Content-Type':'application/json', ...(opts.headers||{}) },
-  });
-  let r = await doFetch();
-  if(r.status === 401){
-    const ok = await refreshToken();
-    if(!ok){ notify('セッション期限切れ。再サインインしてください', 'error'); return null; }
-    r = await doFetch();
-  }
+async function odFetch(url, opts={}){
+  if(!odToken){ notify('OneDriveにサインインしてください','error'); return null; }
+  const go=()=>fetch(url,{...opts,headers:{Authorization:'Bearer '+odToken,'Content-Type':'application/json',...(opts.headers||{})}});
+  let r=await go();
+  if(r.status===401){ const ok=await refreshToken(); if(!ok){notify('セッション期限切れ。再サインインしてください','error');return null;} r=await go(); }
   return r;
 }
 
 function onOdSignedIn(){
-  const name = odAccount?.name || 'ユーザー';
-  const btn = document.getElementById('od-btn');
-  if(btn){
-    btn.classList.add('connected');
-    btn.innerHTML = `<span class="dot" style="background:var(--accent);box-shadow:0 0 5px var(--accent)"></span>${name}`;
-  }
-  const fb = document.getElementById('od-folder-btn');  if(fb) fb.style.display='flex';
-  const sb = document.getElementById('od-signout-btn'); if(sb) sb.style.display='flex';
+  const name=odAccount?.name||'ユーザー';
+  const btn=document.getElementById('od-btn');
+  if(btn){btn.classList.add('connected');btn.innerHTML=`<span class="dot" style="background:var(--accent);box-shadow:0 0 5px var(--accent)"></span>${name}`;}
+  const fb=document.getElementById('od-folder-btn'); if(fb)fb.style.display='flex';
+  const sb=document.getElementById('od-signout-btn'); if(sb)sb.style.display='flex';
   loadMetaFromOd();
-  notify('✓ OneDriveに接続しました: ' + name);
+  notify('✓ OneDriveに接続しました: '+name);
 }
 
 function odSignOut(){
-  odToken=null; odRefresh=null; odAccount=null;
+  odToken=null;odRefresh=null;odAccount=null;
   localStorage.removeItem('movref_od_tokens');
   const btn=document.getElementById('od-btn');
-  if(btn){ btn.classList.remove('connected'); btn.innerHTML='<span class="dot" id="od-dot"></span>OneDrive'; }
-  const fb=document.getElementById('od-folder-btn'); if(fb) fb.style.display='none';
-  const sb=document.getElementById('od-signout-btn'); if(sb) sb.style.display='none';
+  if(btn){btn.classList.remove('connected');btn.innerHTML='<span class="dot" id="od-dot"></span>OneDrive';}
+  const fb=document.getElementById('od-folder-btn');if(fb)fb.style.display='none';
+  const sb=document.getElementById('od-signout-btn');if(sb)sb.style.display='none';
   notify('OneDriveからサインアウトしました');
 }
 
