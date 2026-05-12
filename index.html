@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>movRef v4</title>
+<title>movRef v5</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
@@ -1389,7 +1389,8 @@ async function handleOdRedirect(){
   const error = params.get('error');
 
   if(error){
-    notify('サインインエラー: ' + (params.get('error_description') || error), 'error');
+    const desc = params.get('error_description') || error;
+    notify('サインインエラー: ' + desc, 'error');
     history.replaceState({}, '', location.pathname);
     return;
   }
@@ -1400,39 +1401,62 @@ async function handleOdRedirect(){
   localStorage.removeItem('od_state');
   localStorage.removeItem('od_pkce_verifier');
 
+  // デバッグ: stateの一致確認
+  if(!savedState || !savedVerifier){
+    notify('PKCEデータが見つかりません。再度サインインしてください', 'error');
+    history.replaceState({}, '', location.pathname);
+    return;
+  }
+
   if(state !== savedState){
-    notify('stateが一致しません。再度サインインしてください', 'error');
+    notify('state不一致。再度サインインしてください\n受信:'+state+'\n保存:'+savedState, 'error');
     history.replaceState({}, '', location.pathname);
     return;
   }
 
   const clientId = getClientId();
-  notify('OneDriveに接続中...');
+  notify('OneDriveにトークンを取得中...');
 
   try{
-    const body = new URLSearchParams({
+    const bodyObj = {
       client_id:     clientId,
       grant_type:    'authorization_code',
       code,
       redirect_uri:  getRedirectUri(),
       code_verifier: savedVerifier,
-    });
+    };
     const resp = await fetch(OD_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
+      body: new URLSearchParams(bodyObj).toString(),
     });
+
+    let respData;
+    try{ respData = await resp.json(); }
+    catch(e){ respData = {}; }
+
     if(!resp.ok){
-      const e = await resp.json().catch(()=>({}));
-      throw new Error(e.error_description || e.error || 'トークン取得失敗');
+      const msg = respData.error_description || respData.error || ('HTTP ' + resp.status);
+      throw new Error(msg);
     }
-    const tokens = await resp.json();
-    storeTokens(tokens);
+
+    storeTokens(respData);
     history.replaceState({}, '', location.pathname);
     await loadUserInfo();
     onOdSignedIn();
+
   }catch(e){
-    notify('トークン取得エラー: ' + e.message, 'error');
+    // CORSエラーの場合は特別なメッセージ
+    const isCors = e.message === 'Failed to fetch' || e.name === 'TypeError';
+    if(isCors){
+      notify(
+        'CORSエラー: Azure PortalでアプリのプラットフォームをSPAに変更してください\n' +
+        '（認証 → リダイレクトURI → プラットフォーム: SPA）',
+        'error'
+      );
+    } else {
+      notify('トークン取得エラー: ' + e.message, 'error');
+    }
     history.replaceState({}, '', location.pathname);
   }
 }
