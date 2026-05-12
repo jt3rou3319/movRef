@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>movRef v11</title>
+<title>movRef v13</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
@@ -265,7 +265,20 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 }
 #notif-close:hover{color:var(--text)}
 
-/* ── GIF PROGRESS OVERLAY ── */
+/* ── FOLDER PICKER MODAL ── */
+#folder-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:350;align-items:center;justify-content:center;backdrop-filter:blur(8px)}
+#folder-modal.open{display:flex}
+.folder-modal-card{background:var(--bg1);border:1px solid var(--border2);border-radius:16px;padding:0;width:min(420px,92vw);max-height:80vh;display:flex;flex-direction:column;box-shadow:0 24px 60px rgba(0,0,0,.8)}
+.folder-modal-hd{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--border);flex-shrink:0}
+.folder-modal-title{font-family:'Syne',sans-serif;font-weight:700;font-size:.88rem}
+.folder-modal-x{background:none;border:none;color:var(--text3);cursor:pointer;font-size:1rem;padding:4px 6px;border-radius:6px;transition:color .15s}
+.folder-modal-x:hover{color:var(--text)}
+.folder-list{overflow-y:auto;flex:1;padding:8px}
+.folder-item-btn{width:100%;display:flex;align-items:center;gap:10px;padding:10px 12px;border:none;background:transparent;color:var(--text);cursor:pointer;border-radius:8px;text-align:left;font-size:.82rem;transition:background .15s}
+.folder-item-btn:hover{background:var(--bg3)}
+.folder-item-btn .fi-icon{font-size:1.1rem;flex-shrink:0}
+.folder-item-btn .fi-name{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.folder-modal-loading{padding:32px;text-align:center;color:var(--text3);font-family:'DM Mono',monospace;font-size:.75rem}
 #gif-progress{
   display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);
   z-index:450;align-items:center;justify-content:center;backdrop-filter:blur(8px);
@@ -287,6 +300,19 @@ body{font-family:'Noto Sans JP',sans-serif;background:var(--bg);color:var(--text
 </style>
 </head>
 <body>
+
+<!-- FOLDER PICKER MODAL -->
+<div id="folder-modal">
+  <div class="folder-modal-card">
+    <div class="folder-modal-hd">
+      <span class="folder-modal-title">📁 フォルダを選択</span>
+      <button class="folder-modal-x" onclick="closeFolderModal()">✕</button>
+    </div>
+    <div class="folder-list" id="folder-list">
+      <div class="folder-modal-loading">読み込み中...</div>
+    </div>
+  </div>
+</div>
 
 <!-- GIF PROGRESS OVERLAY -->
 <div id="gif-progress">
@@ -489,10 +515,19 @@ const store={
   load(){
     try{meta=JSON.parse(localStorage.getItem('movref_meta')||'{}')}catch{meta={}}
     try{tagOrder=JSON.parse(localStorage.getItem('movref_tagorder')||'[]')}catch{tagOrder=[]}
+    // videos配列を復元（URLは期限切れになるので保存しない）
+    try{
+      const saved=JSON.parse(localStorage.getItem('movref_videos')||'[]');
+      // url=nullで復元。driveItemIdがあればトークン取得後に自動再取得
+      videos=saved.map(v=>({...v, url:null}));
+    }catch{videos=[];}
   },
   save(){
     localStorage.setItem('movref_meta',JSON.stringify(meta));
     localStorage.setItem('movref_tagorder',JSON.stringify(tagOrder));
+    // videosはURLを除いて保存
+    const toSave=videos.map(({url,...rest})=>rest);
+    localStorage.setItem('movref_videos',JSON.stringify(toSave));
   }
 };
 function M(id){
@@ -682,6 +717,8 @@ function loadLocalFile(id,file){
 
 // ── RENDER ALL ────────────────────────────────────────
 function renderAll(){
+  // videosが更新された際はカードキャッシュをクリアして再構築
+  _cardCache.clear();
   renderSBTags();
   document.getElementById('view-mov').style.display=(curView==='mov')?'block':'none';
   document.getElementById('view-ref').style.display=(curView==='ref')?'block':'none';
@@ -713,29 +750,79 @@ function sortVideos(by){
   renderGallery();
 }
 
-// ── GALLERY ───────────────────────────────────────────
+// カードDOMキャッシュ: video.id → card element
+const _cardCache = new Map();
+
 function renderGallery(){
-  const grid=document.getElementById('video-grid');
-  const list=getFiltered();
-  const sortBy=document.getElementById('sort-sel')?.value||'name';
-  const sorted=applySortToList(list,sortBy);
-  const compact=curCols>=5;
-  const fs=[4,2,1,0,0,0][Math.min(curCols-1,5)];
-  grid.style.setProperty('--cols',curCols);
-  grid.style.setProperty('--gap',Math.max(8,18-curCols*2)+'px');
-  grid.style.setProperty('--card-fs',fs+'px');
-  document.getElementById('v-count').textContent=sorted.length+' 本';
-  if(!sorted.length){
+  const grid = document.getElementById('video-grid');
+  const sortBy = document.getElementById('sort-sel')?.value || 'name';
+  const compact = curCols >= 5;
+  const fs = [4,2,1,0,0,0][Math.min(curCols-1,5)];
+  grid.style.setProperty('--cols', curCols);
+  grid.style.setProperty('--gap', Math.max(8,18-curCols*2)+'px');
+  grid.style.setProperty('--card-fs', fs+'px');
+
+  const filtered = getFiltered();
+  const sorted   = applySortToList(filtered, sortBy);
+  document.getElementById('v-count').textContent = sorted.length + ' 本';
+
+  if(!videos.length){
+    _cardCache.clear();
     grid.innerHTML=`<div class="empty"><div class="bi">🎬</div>
       <p>動画がありません。<br>デモデータを読み込んでください。</p>
       <button class="demo-btn" onclick="loadDemo()">デモデータを読み込む</button></div>`;
     return;
   }
-  grid.innerHTML='';
-  sorted.forEach(v=>{
-    const card=buildMovCard(v,compact);
-    grid.appendChild(card);
-    if(conteMode&&v.url) scheduleConte(v,card);
+
+  // 新しく追加された動画はカードを生成してキャッシュ
+  videos.forEach(v => {
+    if(!_cardCache.has(v.id)){
+      const card = buildMovCard(v, compact);
+      _cardCache.set(v.id, card);
+    }
+  });
+  // 削除された動画のキャッシュを削除
+  const videoIds = new Set(videos.map(v=>v.id));
+  for(const [id] of _cardCache){
+    if(!videoIds.has(id)) _cardCache.delete(id);
+  }
+
+  // コンパクトクラスを最新状態に同期
+  _cardCache.forEach(card => card.classList.toggle('compact', compact));
+
+  // フィルターに合うカードだけ表示し、順序を並び替える
+  const sortedIds = sorted.map(v=>v.id);
+
+  if(!sorted.length){
+    // フィルター結果が0件の場合
+    grid.innerHTML='';
+    const empty = document.createElement('div');
+    empty.className='empty';
+    empty.innerHTML='<div class="bi">🔍</div><p>該当する動画がありません</p>';
+    grid.appendChild(empty);
+    _cardCache.forEach(card=>{ if(card.parentNode===grid) grid.removeChild(card); });
+    return;
+  }
+
+  // 現在gridにある子要素を把握
+  const inGrid = new Set([...grid.children].map(el=>el.dataset?.id).filter(Boolean));
+
+  // 表示すべきカードをgridに追加/再順序
+  sorted.forEach((v,i) => {
+    const card = _cardCache.get(v.id);
+    if(!card) return;
+    card.style.display = '';
+    // コンテモード対応
+    if(conteMode && v.url && !card.querySelector('canvas')) scheduleConte(v, card);
+    grid.appendChild(card); // appendChildは既存ノードを末尾に移動する（順序整列）
+  });
+
+  // フィルターで非表示になるカードをgridから除去（DOMには残す → srcが保持される）
+  const visibleIds = new Set(sortedIds);
+  _cardCache.forEach((card, id) => {
+    if(!visibleIds.has(id) && card.parentNode === grid){
+      grid.removeChild(card); // gridから外すがキャッシュには残す
+    }
   });
 }
 
@@ -1495,14 +1582,60 @@ async function initMsal(){
     }
     await loadUserInfo();
     onOdSignedIn();
-    // OneDrive動画のURLは数時間で期限切れになるため、
-    // 起動時にdriveItemIdを持つ動画のURLをクリアする。
-    // 実際のURLはカードホバーまたはモーダル開封時に自動再取得される。
-    videos.forEach(v => {
-      if(v.driveItemId) v.url = null;
-    });
-    renderAll();
+    // videos はstore.loadで復元済み（url=null）。
+    // driveItemIdを持つ動画のURLをバックグラウンドで静かに再取得する。
+    refreshAllOdUrls();
   }catch(e){ localStorage.removeItem('movref_od_tokens'); }
+}
+
+// 起動時にOneDrive動画のURLをバックグラウンドで一括再取得
+async function refreshAllOdUrls(){
+  const odVideos = videos.filter(v => v.driveItemId && !v.url);
+  if(!odVideos.length) return;
+  // フォルダIDをグループ化して再取得（フォルダごとに1リクエスト）
+  // driveItemIdから親フォルダを推定できないのでアイテム個別取得は重い。
+  // 代わりに、以前読み込んだフォルダ名からフォルダIDを再検索して一括取得する。
+  const sources = [...new Set(odVideos.map(v=>v.source))];
+  for(const source of sources){
+    // source = 'OneDrive: フォルダ名' の形式
+    const folderName = source.replace(/^OneDrive:\s*/,'');
+    await refreshOdFolderUrls(folderName);
+  }
+  renderAll();
+}
+
+// フォルダ名でOneDriveを検索してURLを一括更新
+async function refreshOdFolderUrls(folderName){
+  try{
+    // ルートの子フォルダを検索
+    const r = await odFetch(
+      `https://graph.microsoft.com/v1.0/me/drive/root/children?$top=200`
+    );
+    if(!r||!r.ok) return;
+    const data = await r.json();
+    const folder = (data.value||[]).find(f=>f.name===folderName&&f.folder);
+    if(!folder) return;
+    // フォルダ内の動画を再取得してURLを更新
+    await loadOdFolderUrlsOnly(folder.id, folderName);
+  }catch(e){ console.warn('refreshOdFolderUrls:', e); }
+}
+
+// URLのみ更新（videosへの追加はしない）
+async function loadOdFolderUrlsOnly(folderId, folderName){
+  try{
+    const videoExts = /\.(mp4|mov|m4v|avi|mkv|webm|wmv|flv|mts|m2ts)$/i;
+    let nextUrl = `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children?$top=200`;
+    while(nextUrl){
+      const r = await odFetch(nextUrl);
+      if(!r||!r.ok) break;
+      const data = await r.json();
+      (data.value||[]).filter(f=>f.file&&videoExts.test(f.name)).forEach(item=>{
+        const v = videos.find(x=>x.id==='od_'+item.id);
+        if(v) v.url = item['@microsoft.graph.downloadUrl']||null;
+      });
+      nextUrl = data['@odata.nextLink']||null;
+    }
+  }catch(e){ console.warn('loadOdFolderUrlsOnly:', e); }
 }
 
 async function loadUserInfo(){
@@ -1599,32 +1732,33 @@ store.save = function(){ _origSave(); if(odToken) saveMetaToOd(); };
 // OneDrive のフォルダを一覧 → prompt で選択 → 動画を読み込む
 async function odPickFolder(){
   if(!odToken){ notify('OneDriveにサインインしてください', 'error'); return; }
+  // モーダルを開いてフォルダ一覧を表示
+  document.getElementById('folder-modal').classList.add('open');
+  document.getElementById('folder-list').innerHTML='<div class="folder-modal-loading">フォルダを取得中...</div>';
   try{
-    notify('フォルダ一覧を取得中...');
     const r = await odFetch(
-      `https://graph.microsoft.com/v1.0/me/drive/root/children` +
-      `?$filter=folder ne null&$select=id,name&$top=100`
+      `https://graph.microsoft.com/v1.0/me/drive/root/children?$filter=folder ne null&$select=id,name&$top=200`
     );
-    if(!r||!r.ok){ notify('フォルダ一覧の取得に失敗しました', 'error'); return; }
+    if(!r||!r.ok){ closeFolderModal(); notify('フォルダ一覧の取得に失敗しました', 'error'); return; }
     const data = await r.json();
     const folders = data.value || [];
-    if(!folders.length){ notify('OneDriveのルートにフォルダが見つかりません', 'error'); return; }
-
-    const chosen = prompt(
-      '読み込む動画フォルダを選んでください:\n\n' +
-      folders.map((f,i) => `${i+1}. ${f.name}`).join('\n') +
-      '\n\n番号または名前を入力'
-    );
-    if(!chosen) return;
-
-    const idx = parseInt(chosen) - 1;
-    const folder = (!isNaN(idx) && folders[idx])
-      ? folders[idx]
-      : folders.find(f => f.name === chosen.trim());
-
-    if(!folder){ notify('フォルダが見つかりません', 'error'); return; }
-    await loadOdFolder(folder.id, folder.name);
-  }catch(e){ notify('フォルダ選択エラー: ' + e.message, 'error'); }
+    const list = document.getElementById('folder-list');
+    if(!folders.length){
+      list.innerHTML='<div class="folder-modal-loading">フォルダが見つかりません</div>';
+      return;
+    }
+    list.innerHTML='';
+    folders.sort((a,b)=>a.name.localeCompare(b.name,'ja')).forEach(f=>{
+      const btn=document.createElement('button');
+      btn.className='folder-item-btn';
+      btn.innerHTML=`<span class="fi-icon">📁</span><span class="fi-name">${f.name}</span>`;
+      btn.onclick=()=>{ closeFolderModal(); loadOdFolder(f.id, f.name); };
+      list.appendChild(btn);
+    });
+  }catch(e){ closeFolderModal(); notify('フォルダ選択エラー: '+e.message, 'error'); }
+}
+function closeFolderModal(){
+  document.getElementById('folder-modal').classList.remove('open');
 }
 
 async function loadOdFolder(folderId, folderName){
