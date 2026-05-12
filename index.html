@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>movRef v7</title>
+<title>movRef v11</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
@@ -751,10 +751,13 @@ function buildMovCard(v,compact){
   // Normal thumb
   let thumbHTML='';
   if(!conteMode){
+    // preload="none" + data-src でレイジーロード。
+    // srcを直接埋め込まず、ホバー時に初めてsrcをセットする。
+    // これにより450本分の動画が一気にリクエストされるのを防ぐ。
     thumbHTML=`<div class="card-thumb">
       ${src
-        ?`<video class="thumb-static" src="${src}" muted preload="metadata" onloadedmetadata="this.currentTime=Math.min(2,this.duration*.1)"></video>
-           <video class="thumb-preview" src="${src}" muted loop playsinline></video>`
+        ?`<video class="thumb-static" data-src="${src}" muted preload="none"></video>
+           <video class="thumb-preview" data-src="${src}" muted loop playsinline preload="none"></video>`
         :`<div class="thumb-ph">🎬</div>`}
       <span class="card-dur">${dur}</span>
       <button class="fav-btn${m.fav?' on':''}" onclick="qFav(event,'${v.id}')">${m.fav?'❤️':'🤍'}</button>
@@ -797,10 +800,20 @@ function buildMovCard(v,compact){
       <div class="card-tags">${tags}</div>
     </div>`;
 
-  // hover preview
+  // hover preview: ホバー時に初めてsrcをセット（レイジーロード）
   if(!conteMode&&src){
     card.addEventListener('mouseenter',()=>{
+      const st=card.querySelector('.thumb-static');
       const pv=card.querySelector('.thumb-preview');
+      // 初回ホバー時にsrcをセット
+      if(st&&!st.src&&st.dataset.src){
+        st.src=st.dataset.src;
+        st.preload='metadata';
+        st.addEventListener('loadedmetadata',()=>{
+          st.currentTime=Math.min(2,st.duration*.1);
+        },{once:true});
+      }
+      if(pv&&!pv.src&&pv.dataset.src) pv.src=pv.dataset.src;
       if(pv){pv.currentTime=0;pv.play().catch(()=>{})}
     });
     card.addEventListener('mouseleave',()=>{
@@ -837,7 +850,10 @@ function captureConteFrames(v,card){
   const dur=v.duration||60;
   const step=dur/N;
   const vid=document.createElement('video');
-  vid.src=v.url;vid.muted=true;vid.preload='auto';
+  // URLが期限切れの場合は再取得してからキャプチャ
+  const useSrc = v.url || null;
+  if(!useSrc){ return; } // URLなしはスキップ
+  vid.src=useSrc;vid.muted=true;vid.preload='auto';
   let idx=0;
   function next(){if(idx>=N)return;vid.currentTime=step*idx+step/2}
   vid.addEventListener('seeked',()=>{
@@ -1331,8 +1347,8 @@ function downloadBlob(blob, filename) {
 
 const OD_SCOPES        = 'Files.ReadWrite.AppFolder Files.Read User.Read offline_access';
 const OD_META_FILENAME = 'movref_data.json';
-const OD_AUTH_URL      = 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize';
-const OD_TOKEN_URL     = 'https://login.microsoftonline.com/common/oauth2/v2.0/token';
+const OD_AUTH_URL      = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize';
+const OD_TOKEN_URL     = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token';
 
 let odToken   = null;
 let odRefresh = null;
@@ -1473,8 +1489,19 @@ async function initMsal(){
   try{
     const t = JSON.parse(saved);
     odToken=t.access_token; odRefresh=t.refresh_token;
-    if(t.expires_at < Date.now()+60000){ const ok=await refreshToken(); if(!ok){odToken=null;return;} }
-    await loadUserInfo(); onOdSignedIn();
+    if(t.expires_at < Date.now()+60000){
+      const ok=await refreshToken();
+      if(!ok){ odToken=null; return; }
+    }
+    await loadUserInfo();
+    onOdSignedIn();
+    // OneDrive動画のURLは数時間で期限切れになるため、
+    // 起動時にdriveItemIdを持つ動画のURLをクリアする。
+    // 実際のURLはカードホバーまたはモーダル開封時に自動再取得される。
+    videos.forEach(v => {
+      if(v.driveItemId) v.url = null;
+    });
+    renderAll();
   }catch(e){ localStorage.removeItem('movref_od_tokens'); }
 }
 
@@ -1601,48 +1628,98 @@ async function odPickFolder(){
 }
 
 async function loadOdFolder(folderId, folderName){
-  notify(`「${folderName}」の動画を読み込み中...`);
+  notify(`「${folderName}」の動画を読み込み中... 0本`);
   try{
-    const r = await odFetch(
-      `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children` +
-      `?$select=id,name,createdDateTime,file,@microsoft.graph.downloadUrl&$top=200`
-    );
-    if(!r||!r.ok){ notify('動画の取得に失敗しました', 'error'); return; }
-    const data = await r.json();
     const videoExts = /\.(mp4|mov|m4v|avi|mkv|webm|wmv|flv|mts|m2ts)$/i;
-    const items = (data.value || []).filter(f => f.file && videoExts.test(f.name));
-    if(!items.length){ notify('フォルダに動画が見つかりません', 'error'); return; }
+    let allItems = [];
+    let nextUrl = `https://graph.microsoft.com/v1.0/me/drive/items/${folderId}/children?$top=200`;
+
+    // ページネーション: @odata.nextLink がある限り全ページ取得
+    while(nextUrl){
+      const r = await odFetch(nextUrl);
+      if(!r||!r.ok){ notify('動画の取得に失敗しました', 'error'); return; }
+      const data = await r.json();
+      const page = (data.value || []).filter(f => f.file && videoExts.test(f.name));
+      allItems = allItems.concat(page);
+      notify(`「${folderName}」の動画を読み込み中... ${allItems.length}本`);
+      // 次ページがあれば続ける
+      nextUrl = data['@odata.nextLink'] || null;
+    }
+
+    if(!allItems.length){ notify('フォルダに動画が見つかりません', 'error'); return; }
 
     let added = 0;
-    items.forEach(item => {
+    allItems.forEach(item => {
       const id = 'od_' + item.id;
-      if(videos.find(v => v.id === id)) return;
+      const existing = videos.find(v => v.id === id);
       const d = new Date(item.createdDateTime || Date.now());
       const period = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-      // @microsoft.graph.downloadUrl は一時的なDL URL (認証不要・有効期限あり)
       const url = item['@microsoft.graph.downloadUrl'] || null;
-      videos.push({ id, name:item.name, source:'OneDrive: '+folderName,
-        modified:item.createdDateTime?.slice(0,10)||'', url, duration:null });
-      const m = M(id); if(!m.period) m.period = period;
-      added++;
+      const driveItemId = item.id;
+
+      if(existing){
+        existing.url = url;
+        existing.driveItemId = driveItemId;
+      } else {
+        videos.push({
+          id, name: item.name,
+          source: 'OneDrive: '+folderName,
+          modified: item.createdDateTime?.slice(0,10)||'',
+          url, duration: null, driveItemId,
+        });
+        const m = M(id); if(!m.period) m.period = period;
+        added++;
+      }
     });
     store.save(); renderAll();
-    notify(`✓ ${added}本の動画を読み込みました（全${items.length}本）`);
+    notify(`✓ ${added}本の動画を読み込みました（全${allItems.length}本）`);
   }catch(e){ notify('動画読み込みエラー: ' + e.message, 'error'); }
 }
 
+// OneDriveアイテムのdownloadUrlを再取得（期限切れ対策）
+async function refreshOdUrl(videoId){
+  const v = videos.find(x => x.id === videoId);
+  if(!v || !v.driveItemId) return null;
+  try{
+    const r = await odFetch(`https://graph.microsoft.com/v1.0/me/drive/items/${v.driveItemId}`);
+    if(!r||!r.ok) return null;
+    const data = await r.json();
+    const url = data['@microsoft.graph.downloadUrl'] || null;
+    if(url){ v.url = url; }
+    return url;
+  }catch(e){ return null; }
+}
+
 // ── MODAL ─────────────────────────────────────────────
-function openModal(id,tab){
+async function openModal(id,tab){
   curVid=id;inPt=null;outPt=null;
   const v=videos.find(v=>v.id===id);
   document.getElementById('modal-title').textContent=v.name;
   const ve=document.getElementById('modal-video');
-  if(v.url){ve.src=v.url;ve.style.display='block'}
-  else{ve.src='';ve.style.display='none';pickFile(id)}
-  setSpeed(1);// reset speed
+  setSpeed(1);
   updateMarkers();renderModalMeta();renderClips();switchMTab(tab||'info');
   document.getElementById('modal-overlay').classList.add('open');
   ve.addEventListener('timeupdate',onTU);ve.addEventListener('loadedmetadata',onLM);
+
+  // OneDriveのURLを使う（期限切れなら再取得）
+  let url = v.url;
+  if(!url && v.driveItemId){
+    notify('OneDriveから動画URLを取得中...');
+    url = await refreshOdUrl(id);
+  }
+
+  if(url){
+    ve.src=url; ve.style.display='block';
+    // 再生エラー時（URL期限切れ）は自動再取得
+    ve.onerror=async()=>{
+      if(!v.driveItemId) return;
+      notify('URLを再取得中...');
+      const newUrl=await refreshOdUrl(id);
+      if(newUrl){ ve.src=newUrl; ve.onerror=null; }
+    };
+  } else {
+    ve.src='';ve.style.display='none';pickFile(id);
+  }
 }
 function pickFile(id){
   const inp=document.createElement('input');inp.type='file';inp.accept='video/*';
