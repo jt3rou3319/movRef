@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>movRef v5</title>
+<title>movRef v6</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;600;700;800&family=Noto+Sans+JP:wght@300;400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
@@ -1325,9 +1325,10 @@ function downloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 8000);
 }
 
-// ── ONEDRIVE AUTH (OAuth2 PKCE, CDN不要・自前実装) ────
-// MSAL CDNへの依存を排除。OAuth2 PKCEフローを直接実装。
-// GitHub Pagesで動作。ポップアップ不要のリダイレクト方式。
+// ── ONEDRIVE AUTH (OAuth2 PKCE ポップアップ方式) ──────
+// MSALライブラリ不要。window.openでMicrosoft認証を開き
+// postMessageでトークンを受け取る方式。
+// GitHub PagesのSPA登録で動作。
 
 const OD_SCOPES       = 'Files.ReadWrite.AppFolder Files.Read User.Read offline_access';
 const OD_META_FILENAME = 'movref_data.json';
@@ -1346,14 +1347,13 @@ async function pkceChallenge(){
   const arr = crypto.getRandomValues(new Uint8Array(32));
   const verifier = btoa(String.fromCharCode(...arr))
     .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
-  const buf = await crypto.subtle.digest('SHA-256',
-    new TextEncoder().encode(verifier));
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
   const challenge = btoa(String.fromCharCode(...new Uint8Array(buf)))
     .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
   return { verifier, challenge };
 }
 
-// ── SIGN IN (リダイレクト方式) ────────────────────────
+// ── SIGN IN ───────────────────────────────────────────
 async function odSignIn(){
   let clientId = getClientId();
   if(!clientId){
@@ -1364,100 +1364,102 @@ async function odSignIn(){
 
   const { verifier, challenge } = await pkceChallenge();
   const state = crypto.randomUUID();
-  // localStorageに保存（sessionStorageはリダイレクト後に消えるブラウザがある）
+
+  // PKCEデータをlocalStorageに保存
   localStorage.setItem('od_pkce_verifier', verifier);
   localStorage.setItem('od_state', state);
 
   const params = new URLSearchParams({
-    client_id:     clientId,
-    response_type: 'code',
-    redirect_uri:  getRedirectUri(),
-    scope:         OD_SCOPES,
+    client_id:             clientId,
+    response_type:         'code',
+    redirect_uri:          getRedirectUri(),
+    scope:                 OD_SCOPES,
     state,
     code_challenge:        challenge,
     code_challenge_method: 'S256',
-    response_mode: 'query',
+    response_mode:         'fragment', // fragmentならURLのhashに入るのでサーバーに送られない
   });
+
+  // 同じタブでリダイレクト（ポップアップブロック回避）
   location.href = OD_AUTH_URL + '?' + params.toString();
 }
 
-// ── リダイレクト後の認可コード受け取り ───────────────
+// ── リダイレクト後の処理（fragment mode）─────────────
+// response_mode=fragment の場合、認可コードはURLのhash(#)に入る
 async function handleOdRedirect(){
-  const params = new URLSearchParams(location.search);
-  const code  = params.get('code');
-  const state = params.get('state');
-  const error = params.get('error');
+  // fragmentモード: #code=...&state=...
+  const hash   = location.hash.slice(1); // '#' を除去
+  const search = location.search;        // ?code=... の場合も対応
+
+  const fromHash   = new URLSearchParams(hash);
+  const fromSearch = new URLSearchParams(search);
+
+  // どちらかにcodeがあれば処理
+  const code  = fromHash.get('code')  || fromSearch.get('code');
+  const state = fromHash.get('state') || fromSearch.get('state');
+  const error = fromHash.get('error') || fromSearch.get('error');
 
   if(error){
-    const desc = params.get('error_description') || error;
-    notify('サインインエラー: ' + desc, 'error');
+    const desc = fromHash.get('error_description') || fromSearch.get('error_description') || error;
+    notify('サインインエラー: ' + decodeURIComponent(desc.replace(/\+/g,' ')), 'error');
     history.replaceState({}, '', location.pathname);
     return;
   }
-  if(!code) return;
+  if(!code) return; // 認可コードなし → 通常起動
 
   const savedState    = localStorage.getItem('od_state');
   const savedVerifier = localStorage.getItem('od_pkce_verifier');
   localStorage.removeItem('od_state');
   localStorage.removeItem('od_pkce_verifier');
 
-  // デバッグ: stateの一致確認
-  if(!savedState || !savedVerifier){
+  // URLをすぐクリーンアップ
+  history.replaceState({}, '', location.pathname);
+
+  if(!savedVerifier){
     notify('PKCEデータが見つかりません。再度サインインしてください', 'error');
-    history.replaceState({}, '', location.pathname);
+    return;
+  }
+  if(savedState && state !== savedState){
+    notify('セキュリティチェック失敗。再度サインインしてください', 'error');
     return;
   }
 
-  if(state !== savedState){
-    notify('state不一致。再度サインインしてください\n受信:'+state+'\n保存:'+savedState, 'error');
-    history.replaceState({}, '', location.pathname);
-    return;
-  }
-
+  notify('OneDriveに接続中...');
   const clientId = getClientId();
-  notify('OneDriveにトークンを取得中...');
 
   try{
-    const bodyObj = {
-      client_id:     clientId,
-      grant_type:    'authorization_code',
-      code,
-      redirect_uri:  getRedirectUri(),
-      code_verifier: savedVerifier,
-    };
     const resp = await fetch(OD_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams(bodyObj).toString(),
+      body: new URLSearchParams({
+        client_id:     clientId,
+        grant_type:    'authorization_code',
+        code,
+        redirect_uri:  getRedirectUri(),
+        code_verifier: savedVerifier,
+      }).toString(),
     });
 
-    let respData;
-    try{ respData = await resp.json(); }
-    catch(e){ respData = {}; }
+    let data;
+    try{ data = await resp.json(); } catch(e){ data = {}; }
 
     if(!resp.ok){
-      const msg = respData.error_description || respData.error || ('HTTP ' + resp.status);
+      const msg = data.error_description || data.error || ('HTTP ' + resp.status);
+      // CORSかどうか判定
       throw new Error(msg);
     }
 
-    storeTokens(respData);
-    history.replaceState({}, '', location.pathname);
+    storeTokens(data);
     await loadUserInfo();
     onOdSignedIn();
 
   }catch(e){
-    // CORSエラーの場合は特別なメッセージ
     const isCors = e.message === 'Failed to fetch' || e.name === 'TypeError';
     if(isCors){
-      notify(
-        'CORSエラー: Azure PortalでアプリのプラットフォームをSPAに変更してください\n' +
-        '（認証 → リダイレクトURI → プラットフォーム: SPA）',
-        'error'
-      );
+      notify('CORSエラー: Azure PortalでプラットフォームをSPAに設定してください', 'error');
     } else {
       notify('トークン取得エラー: ' + e.message, 'error');
     }
-    history.replaceState({}, '', location.pathname);
   }
 }
 
@@ -1476,16 +1478,15 @@ async function refreshToken(){
   const clientId = getClientId();
   if(!clientId || !odRefresh) return false;
   try{
-    const body = new URLSearchParams({
-      client_id:     clientId,
-      grant_type:    'refresh_token',
-      refresh_token: odRefresh,
-      scope:         OD_SCOPES,
-    });
     const resp = await fetch(OD_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
+      body: new URLSearchParams({
+        client_id:     clientId,
+        grant_type:    'refresh_token',
+        refresh_token: odRefresh,
+        scope:         OD_SCOPES,
+      }).toString(),
     });
     if(!resp.ok) return false;
     const tokens = await resp.json();
@@ -1502,7 +1503,6 @@ async function initMsal(){
     const t = JSON.parse(saved);
     odToken   = t.access_token;
     odRefresh = t.refresh_token;
-    // 期限切れならリフレッシュ
     if(t.expires_at < Date.now() + 60000){
       const ok = await refreshToken();
       if(!ok){ odToken = null; return; }
@@ -1522,20 +1522,14 @@ async function loadUserInfo(){
   }catch(e){}
 }
 
-// ── API fetch with auto-refresh ────────────────────────
 async function odFetch(url, opts = {}){
   if(!odToken){ notify('OneDriveにサインインしてください', 'error'); return null; }
   const doFetch = () => fetch(url, {
     ...opts,
-    headers: {
-      Authorization: 'Bearer ' + odToken,
-      'Content-Type': 'application/json',
-      ...(opts.headers || {}),
-    },
+    headers:{ Authorization:'Bearer '+odToken, 'Content-Type':'application/json', ...(opts.headers||{}) },
   });
   let r = await doFetch();
   if(r.status === 401){
-    // トークン期限切れ → リフレッシュして再試行
     const ok = await refreshToken();
     if(!ok){ notify('セッション期限切れ。再サインインしてください', 'error'); return null; }
     r = await doFetch();
@@ -1550,19 +1544,19 @@ function onOdSignedIn(){
     btn.classList.add('connected');
     btn.innerHTML = `<span class="dot" style="background:var(--accent);box-shadow:0 0 5px var(--accent)"></span>${name}`;
   }
-  const fb = document.getElementById('od-folder-btn');  if(fb) fb.style.display = 'flex';
-  const sb = document.getElementById('od-signout-btn'); if(sb) sb.style.display = 'flex';
+  const fb = document.getElementById('od-folder-btn');  if(fb) fb.style.display='flex';
+  const sb = document.getElementById('od-signout-btn'); if(sb) sb.style.display='flex';
   loadMetaFromOd();
   notify('✓ OneDriveに接続しました: ' + name);
 }
 
 function odSignOut(){
-  odToken = null; odRefresh = null; odAccount = null;
+  odToken=null; odRefresh=null; odAccount=null;
   localStorage.removeItem('movref_od_tokens');
-  const btn = document.getElementById('od-btn');
-  if(btn){ btn.classList.remove('connected'); btn.innerHTML = '<span class="dot" id="od-dot"></span>OneDrive'; }
-  const fb = document.getElementById('od-folder-btn');  if(fb) fb.style.display = 'none';
-  const sb = document.getElementById('od-signout-btn'); if(sb) sb.style.display = 'none';
+  const btn=document.getElementById('od-btn');
+  if(btn){ btn.classList.remove('connected'); btn.innerHTML='<span class="dot" id="od-dot"></span>OneDrive'; }
+  const fb=document.getElementById('od-folder-btn'); if(fb) fb.style.display='none';
+  const sb=document.getElementById('od-signout-btn'); if(sb) sb.style.display='none';
   notify('OneDriveからサインアウトしました');
 }
 
@@ -1848,11 +1842,12 @@ function fmt(s){
 store.load();
 applyDesktopSB();
 updateFilterUI();
-// OneDriveリダイレクト処理（認可コードがURLにある場合）→ なければトークン復元
-if(location.search.includes('code=')){
+// OneDriveコールバック検出: hash(#)またはquery(?)にcodeがある場合
+const _hasCode = location.hash.includes('code=') || location.search.includes('code=');
+if(_hasCode){
   handleOdRedirect();
 } else {
-  initMsal();
+  initMsal(); // 保存済みトークンで自動サインイン
 }
 switchView('mov');
 </script>
